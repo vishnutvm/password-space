@@ -1,0 +1,27 @@
+{
+  "name": "@password-space/cli",
+  "version": "0.1.0",
+  "description": "CLI for Password Space local vault",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "password-space": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@password-space/vault": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5",
+    "@types/node": "^22.13.4"
+  }
+}
