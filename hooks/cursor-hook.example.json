@@ -1,0 +1,15 @@
+{
+  "$comment": "Prefer the marketplace plugin hooks at plugins/password-space/hooks/hooks.json. This file is a local-wiring sketch.",
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "./plugins/password-space/scripts/redact.mjs"
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "./plugins/password-space/scripts/redact.mjs"
+      }
+    ]
+  }
+}
