@@ -1,0 +1,18 @@
+{
+  "name": "password-space-marketplace",
+  "owner": {
+    "name": "Vishnu",
+    "email": "vishnutvm@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Password Space — local credential vault for Cursor agents (MCP + Skill + redaction hooks).",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "password-space",
+      "source": "./plugins/password-space",
+      "description": "Local encrypted vault for AI agents — inject secrets via MCP, never paste them in chat"
+    }
+  ]
+}

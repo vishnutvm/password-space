@@ -1,0 +1,33 @@
+{
+  "name": "password-space",
+  "version": "0.1.0",
+  "description": "Local credential vault for humans and AI agents — secrets via MCP inject, never in chat.",
+  "author": {
+    "name": "Vishnu",
+    "email": "vishnutvm@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/vishnutvm/password-space",
+  "repository": "https://github.com/vishnutvm/password-space",
+  "license": "MIT",
+  "keywords": [
+    "password",
+    "secrets",
+    "vault",
+    "mcp",
+    "credentials",
+    "security",
+    "inject"
+  ],
+  "logo": "assets/logo.svg",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "PASSWORD_SPACE_HOME": {
+        "type": "string",
+        "title": "Password Space home",
+        "description": "Directory for the encrypted vault and unlock session (default: ~/.password-space). No secrets are stored in the plugin — only this path.",
+        "default": ""
+      }
+    }
+  }
+}

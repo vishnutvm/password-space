@@ -10,10 +10,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm -r run build",
+    "build": "pnpm -r run build && pnpm run build:plugin",
+    "build:plugin": "node scripts/bundle-mcp.mjs",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint --if-present",
-    "password-space": "node --no-warnings packages/cli/dist/index.js"
+    "password-space": "node --no-warnings packages/cli/dist/index.js",
+    "mcp": "node --no-warnings plugins/password-space/dist/index.js",
+    "demo": "bash scripts/demo.sh"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
