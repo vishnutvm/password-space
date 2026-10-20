@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "./scripts/redact.mjs"
+      }
+    ]
+  }
+}
