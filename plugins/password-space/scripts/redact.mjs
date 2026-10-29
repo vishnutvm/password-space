@@ -10,8 +10,15 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 function dataDir() {
-  const home = process.env.PASSWORD_SPACE_HOME?.trim();
-  return home || join(homedir(), ".password-space");
+  const raw = process.env.PASSWORD_SPACE_HOME?.trim();
+  if (
+    !raw ||
+    raw === "${PASSWORD_SPACE_HOME}" ||
+    /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(raw)
+  ) {
+    return join(homedir(), ".password-space");
+  }
+  return raw;
 }
 
 function parseArgs(argv) {

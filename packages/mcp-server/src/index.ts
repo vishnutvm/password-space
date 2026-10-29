@@ -24,8 +24,8 @@ import {
   vaultUnlockTool,
 } from "./tools.js";
 
-const dataDir =
-  process.env.PASSWORD_SPACE_HOME?.trim() || defaultDataDir();
+// defaultDataDir ignores empty / unresolved `${PASSWORD_SPACE_HOME}` placeholders
+const dataDir = defaultDataDir();
 
 function withStore<T>(fn: (store: ReturnType<typeof openVault>) => T): T {
   const store = openVault({ dataDir, useSession: true });
