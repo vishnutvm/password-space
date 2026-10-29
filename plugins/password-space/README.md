@@ -9,7 +9,6 @@ Local encrypted credential vault for Cursor agents. Secrets stay out of chat: ag
 | MCP (`dist/index.js`) | Self-contained vault + MCP tools (init/unlock/store/list/inject) |
 | Skill | Onboarding via MCP; prefer inject; never paste secrets in chat |
 | Hook | `beforeSubmitPrompt` redaction via `scripts/redact.mjs` |
-| Variable | `PASSWORD_SPACE_HOME` — optional vault directory (default `~/.password-space`; never leave unresolved `${…}` as the path) |
 
 ## After install (primary path)
 
@@ -25,7 +24,7 @@ The agent should call:
 4. `vault_set_secret` (value via tool arg — **not** chat)
 5. `inject_secret` when a credential is needed
 
-Optional: set a real absolute `PASSWORD_SPACE_HOME` only if your vault is not at `~/.password-space`. Leave unset for the default. Do not pass unresolved `${PASSWORD_SPACE_HOME}` into MCP env.
+Vault home defaults to `~/.password-space` in code. There is no Plugins → Configure variable (so Configure does not need a JSON Schema). Override only via a real absolute `PASSWORD_SPACE_HOME` in the process environment or a hand-written MCP `env` block — never an unresolved `${PASSWORD_SPACE_HOME}` placeholder.
 
 ## MCP tools
 

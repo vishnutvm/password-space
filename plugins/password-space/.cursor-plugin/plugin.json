@@ -18,17 +18,5 @@
     "security",
     "inject"
   ],
-  "logo": "assets/logo.svg",
-  "variables": {
-    "type": "object",
-    "properties": {
-      "PASSWORD_SPACE_HOME": {
-        "type": "string",
-        "title": "Password Space home",
-        "description": "Optional vault directory (absolute path). Leave blank for ~/.password-space. Passphrase is not configured here — use the MCP secret prompt / tool argument.",
-        "default": ""
-      }
-    },
-    "required": []
-  }
+  "logo": "assets/logo.svg"
 }
