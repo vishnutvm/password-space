@@ -25,9 +25,10 @@
       "PASSWORD_SPACE_HOME": {
         "type": "string",
         "title": "Password Space home",
-        "description": "Optional vault directory (absolute path). Leave empty for ~/.password-space. Never use an unresolved ${PASSWORD_SPACE_HOME} placeholder.",
+        "description": "Optional vault directory (absolute path). Leave blank for ~/.password-space. Passphrase is not configured here — use the MCP secret prompt / tool argument.",
         "default": ""
       }
-    }
+    },
+    "required": []
   }
 }
