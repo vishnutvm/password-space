@@ -195,7 +195,7 @@ export class VaultStore {
 
   private requireKey(): Buffer {
     if (!this.vaultKey) {
-      throw new VaultError("Vault is locked. Run: password-space unlock", "LOCKED");
+      throw new VaultError("Vault is locked. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
     }
     return this.vaultKey;
   }

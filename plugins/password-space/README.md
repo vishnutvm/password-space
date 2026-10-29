@@ -6,24 +6,43 @@ Local encrypted credential vault for Cursor agents. Secrets stay out of chat: ag
 
 | Component | Role |
 | --- | --- |
-| MCP (`dist/index.js`) | `list_secrets`, `get_secret_metadata`, `inject_secret`, `resolve_secret` |
-| Skill | Prefer inject; never paste plaintext secrets in chat |
+| MCP (`dist/index.js`) | Self-contained vault + MCP tools (init/unlock/store/list/inject) |
+| Skill | Onboarding via MCP; prefer inject; never paste secrets in chat |
 | Hook | `beforeSubmitPrompt` redaction via `scripts/redact.mjs` |
 | Variable | `PASSWORD_SPACE_HOME` — vault directory (optional; default `~/.password-space`) |
 
-## After install
+## After install (primary path)
 
-1. **Unlock is required** — the plugin does not store your passphrase. From this repo (or a local clone):
+No `git clone` or `pnpm` required for day-1 setup. Ask the agent, for example:
 
-   ```bash
-   pnpm install && pnpm build
-   pnpm password-space init      # once
-   pnpm password-space unlock   # each session
-   ```
+> Set up Password Space: check vault status, init if needed, unlock, then store my API token.
 
-2. Optional: **Plugins → Configure** → set `PASSWORD_SPACE_HOME` if your vault is not at `~/.password-space`.
+The agent should call:
 
-3. Agents should call **`inject_secret`**, not paste values into the conversation.
+1. `vault_status`
+2. `vault_init` (passphrase via tool arg / UI prompt or `PASSWORD_SPACE_PASSPHRASE` — **not** chat)
+3. `vault_unlock`
+4. `vault_set_secret` (value via tool arg — **not** chat)
+5. `inject_secret` when a credential is needed
+
+Optional: **Plugins → Configure** → set `PASSWORD_SPACE_HOME` if your vault is not at `~/.password-space`.
+
+## MCP tools
+
+| Tool | Returns secret value? | Use |
+| --- | --- | --- |
+| `vault_status` | No | Initialized? Unlocked? |
+| `vault_init` | No | Create vault |
+| `vault_unlock` / `vault_lock` | No | Session unlock / lock |
+| `vault_set_secret` | No (metadata only) | Store/update secrets |
+| `list_secrets` | No | Discover names / ids / tags |
+| `get_secret_metadata` | No | One secret’s metadata |
+| `inject_secret` | **No** (writes env file) | **Preferred** agent access |
+| `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |
+
+## Optional CLI (power users)
+
+From a local clone of this repo: `pnpm install && pnpm build`, then `pnpm password-space …`. See the [root README](../../README.md).
 
 ## Manual MCP (without marketplace)
 

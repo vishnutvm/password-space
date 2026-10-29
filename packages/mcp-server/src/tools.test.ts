@@ -2,27 +2,39 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { VaultStore } from "@password-space/vault";
+import { VaultStore, openVault } from "@password-space/vault";
 import {
   assertNoPlaintext,
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
+  resolvePassphrase,
   resolveSecretTool,
+  vaultInitTool,
+  vaultLockTool,
+  vaultSetSecretTool,
+  vaultStatusTool,
+  vaultUnlockTool,
 } from "./tools.js";
 
 const dirs: string[] = [];
 
 afterEach(() => {
+  delete process.env.PASSWORD_SPACE_PASSPHRASE;
   while (dirs.length) {
     const d = dirs.pop();
     if (d) rmSync(d, { recursive: true, force: true });
   }
 });
 
-async function unlockedStore(): Promise<{ dir: string; store: VaultStore; value: string }> {
+function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "ps-mcp-"));
   dirs.push(dir);
+  return dir;
+}
+
+async function unlockedStore(): Promise<{ dir: string; store: VaultStore; value: string }> {
+  const dir = tempDir();
   const store = new VaultStore(join(dir, "vault.db"));
   await store.init("test-passphrase-ok");
   await store.unlock("test-passphrase-ok");
@@ -82,6 +94,114 @@ describe("MCP tools contract", () => {
     const { store } = await unlockedStore();
     store.lock();
     expect(() => listSecretsTool(store)).toThrow(/locked/i);
+    store.close();
+  });
+});
+
+describe("vault lifecycle MCP tools", () => {
+  it("resolvePassphrase prefers tool arg then env", () => {
+    expect(() => resolvePassphrase()).toThrow(/Passphrase required/);
+    process.env.PASSWORD_SPACE_PASSPHRASE = "env-passphrase-xx";
+    expect(resolvePassphrase()).toBe("env-passphrase-xx");
+    expect(resolvePassphrase("arg-passphrase-yy")).toBe("arg-passphrase-yy");
+  });
+
+  it("vault_status reports uninitialized vault", () => {
+    const dir = tempDir();
+    const store = new VaultStore(join(dir, "vault.db"));
+    const result = vaultStatusTool(store, dir);
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      initialized: boolean;
+      unlocked: boolean;
+      next: string;
+    };
+    expect(parsed.initialized).toBe(false);
+    expect(parsed.unlocked).toBe(false);
+    expect(parsed.next).toMatch(/vault_init/);
+    store.close();
+  });
+
+  it("vault_init → unlock → set_secret without leaking secrets", async () => {
+    const dir = tempDir();
+    const passphrase = "setup-ux-passphrase";
+    const secretValue = "store-me-BUT-NEVER-LEAK-xyz";
+
+    const initStore = new VaultStore(join(dir, "vault.db"));
+    const initResult = await vaultInitTool(initStore, dir, { passphrase });
+    assertNoPlaintext(initResult, passphrase);
+    const initParsed = JSON.parse(initResult.content[0]!.text) as { ok: boolean; initialized: boolean };
+    expect(initParsed.ok).toBe(true);
+    expect(initParsed.initialized).toBe(true);
+    initStore.close();
+
+    const unlockResult = await vaultUnlockTool(dir, { passphrase, ttl_hours: 1 });
+    assertNoPlaintext(unlockResult, passphrase);
+    const unlockParsed = JSON.parse(unlockResult.content[0]!.text) as {
+      ok: boolean;
+      unlocked: boolean;
+      expires_at: string;
+    };
+    expect(unlockParsed.ok).toBe(true);
+    expect(unlockParsed.unlocked).toBe(true);
+    expect(unlockParsed.expires_at).toBeTruthy();
+
+    const store = openVault({ dataDir: dir, useSession: true });
+    expect(store.isUnlocked).toBe(true);
+    const status = vaultStatusTool(store, dir);
+    const statusParsed = JSON.parse(status.content[0]!.text) as {
+      initialized: boolean;
+      unlocked: boolean;
+    };
+    expect(statusParsed.initialized).toBe(true);
+    expect(statusParsed.unlocked).toBe(true);
+
+    const setResult = vaultSetSecretTool(store, {
+      name: "API_TOKEN",
+      value: secretValue,
+      tags: ["api", "demo"],
+    });
+    assertNoPlaintext(setResult, secretValue);
+    assertNoPlaintext(setResult, passphrase);
+    const setParsed = JSON.parse(setResult.content[0]!.text) as {
+      ok: boolean;
+      secret: { name: string; value?: string; tags: string[] };
+    };
+    expect(setParsed.ok).toBe(true);
+    expect(setParsed.secret.name).toBe("API_TOKEN");
+    expect(setParsed.secret.value).toBeUndefined();
+    expect(setParsed.secret.tags).toEqual(["api", "demo"]);
+
+    const listed = listSecretsTool(store);
+    assertNoPlaintext(listed, secretValue);
+    store.close();
+
+    const lockResult = vaultLockTool(dir);
+    const lockParsed = JSON.parse(lockResult.content[0]!.text) as { locked: boolean };
+    expect(lockParsed.locked).toBe(true);
+
+    const locked = openVault({ dataDir: dir, useSession: true });
+    expect(locked.isUnlocked).toBe(false);
+    locked.close();
+  });
+
+  it("vault_init accepts passphrase from env", async () => {
+    const dir = tempDir();
+    process.env.PASSWORD_SPACE_PASSPHRASE = "env-only-passphrase";
+    const store = new VaultStore(join(dir, "vault.db"));
+    const result = await vaultInitTool(store, dir, {});
+    assertNoPlaintext(result, "env-only-passphrase");
+    expect(store.isInitialized()).toBe(true);
+    store.close();
+  });
+
+  it("vault_init refuses when already initialized", async () => {
+    const dir = tempDir();
+    const store = new VaultStore(join(dir, "vault.db"));
+    await store.init("already-inited-xx");
+    const result = await vaultInitTool(store, dir, { passphrase: "already-inited-xx" });
+    const parsed = JSON.parse(result.content[0]!.text) as { ok: boolean; error: string };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toMatch(/already initialized/i);
     store.close();
   });
 });
