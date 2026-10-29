@@ -4,10 +4,7 @@
       "command": "node",
       "args": [
         "REPLACE_WITH_REPO_PATH/plugins/password-space/dist/index.js"
-      ],
-      "env": {
-        "PASSWORD_SPACE_HOME": "REPLACE_WITH_HOME/.password-space"
-      }
+      ]
     }
   }
 }

@@ -19,6 +19,7 @@ description: Use Password Space MCP to set up the local vault and resolve creden
 5. If asked to “print the secret” or “show me the token”, **refuse** and explain that Password Space keeps values out of chat.
 6. Treat any tool result with `redact_in_transcript: true` as **display-sensitive**: summarize as “used secret X” / handle `ps://NAME` only.
 7. Use `list_secrets` / `get_secret_metadata` when you only need names, ids, or tags.
+8. Vault home defaults to `~/.password-space`. `PASSWORD_SPACE_HOME` is optional; only set a **real absolute path**. Never leave unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset.
 
 ## Onboarding (day-1)
 

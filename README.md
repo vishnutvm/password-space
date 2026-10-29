@@ -64,7 +64,7 @@ Day-1 setup does **not** require `git clone` or `pnpm`.
 2. **+ Add Marketplace** → **Import from GitHub**.
 3. Paste: `https://github.com/vishnutvm/password-space`
 4. Install the **password-space** plugin.
-5. Optional: **Plugins → Configure** → `PASSWORD_SPACE_HOME` (empty = `~/.password-space`).
+5. Optional custom vault path: set a **real** `PASSWORD_SPACE_HOME` (absolute path) in the environment or a hand-written MCP `env` block. Leave it unset to use `~/.password-space`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default.
 6. Ask the agent, for example:
 
    > Set up Password Space for me: check status, init the vault if needed, unlock it, then store my API token.
@@ -139,14 +139,13 @@ Without the marketplace, point Cursor (or another MCP client) at the **bundled**
   "mcpServers": {
     "password-space": {
       "command": "node",
-      "args": ["/absolute/path/to/password-space/plugins/password-space/dist/index.js"],
-      "env": {
-        "PASSWORD_SPACE_HOME": "/home/you/.password-space"
-      }
+      "args": ["/absolute/path/to/password-space/plugins/password-space/dist/index.js"]
     }
   }
 }
 ```
+
+`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`. If you override, use a concrete absolute path only (never an unresolved `${PASSWORD_SPACE_HOME}` placeholder).
 
 Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugins/password-space/skills/password-space/`. Hooks: `plugins/password-space/hooks/hooks.json`.
 
@@ -222,7 +221,7 @@ Detail: [docs/architecture.md](./docs/architecture.md).
 | `Wrong passphrase` | Typo or wrong vault | Confirm `PASSWORD_SPACE_HOME` matches the vault you meant |
 | Plugin installed but MCP errors “locked” | Session missing/expired | Call `vault_unlock` (same `PASSWORD_SPACE_HOME`) |
 | Secret not found | Wrong name / empty vault | `list_secrets` after unlock |
-| Unexpected data dir | Env override | Check `PASSWORD_SPACE_HOME` / plugin variable; `vault_status` |
+| Unexpected data dir | Env override or unresolved `${…}` | Check `PASSWORD_SPACE_HOME` is a real path or unset; `vault_status` shows `data_dir` (placeholders fall back to `~/.password-space`) |
 | MCP won’t start | Bad path to `dist/index.js` | Rebuild with `pnpm build`, or reinstall the plugin |
 
 ## Development

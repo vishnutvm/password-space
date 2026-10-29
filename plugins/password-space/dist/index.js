@@ -21615,10 +21615,22 @@ function unpackBlob(packed) {
 // packages/vault/dist/paths.js
 import { homedir } from "node:os";
 import { join } from "node:path";
-function defaultDataDir(env = process.env) {
-  if (env.PASSWORD_SPACE_HOME) {
-    return env.PASSWORD_SPACE_HOME;
+var UNRESOLVED_ENV_PLACEHOLDER = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
+function resolvePasswordSpaceHome(raw) {
+  if (raw == null)
+    return void 0;
+  const trimmed = raw.trim();
+  if (!trimmed)
+    return void 0;
+  if (trimmed === "${PASSWORD_SPACE_HOME}" || UNRESOLVED_ENV_PLACEHOLDER.test(trimmed)) {
+    return void 0;
   }
+  return trimmed;
+}
+function defaultDataDir(env = process.env) {
+  const fromEnv = resolvePasswordSpaceHome(env.PASSWORD_SPACE_HOME);
+  if (fromEnv)
+    return fromEnv;
   return join(homedir(), ".password-space");
 }
 function vaultDbPath(dataDir2) {
@@ -22225,7 +22237,7 @@ function assertUnlocked(store) {
 }
 
 // packages/mcp-server/src/index.ts
-var dataDir = process.env.PASSWORD_SPACE_HOME?.trim() || defaultDataDir();
+var dataDir = defaultDataDir();
 function withStore(fn) {
   const store = openVault({ dataDir, useSession: true });
   try {
