@@ -53,7 +53,7 @@ export function writeSession(
 
 export function readSession(sessionFilePath: string): { vaultKey: Buffer; dataDir: string; expiresAt: string } {
   if (!existsSync(sessionFilePath)) {
-    throw new VaultError("No unlock session. Run: password-space unlock", "LOCKED");
+    throw new VaultError("No unlock session. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
   }
   const raw = readFileSync(sessionFilePath, "utf8");
   let payload: SessionFile;
@@ -67,7 +67,7 @@ export function readSession(sessionFilePath: string): { vaultKey: Buffer; dataDi
   }
   if (new Date(payload.expiresAt).getTime() < Date.now()) {
     clearSession(sessionFilePath);
-    throw new VaultError("Unlock session expired. Run: password-space unlock", "LOCKED");
+    throw new VaultError("Unlock session expired. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
   }
   const fileKey = Buffer.from(payload.fileKey, "base64");
   if (fileKey.length !== KEY_LEN) {

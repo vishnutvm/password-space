@@ -2,8 +2,11 @@
 /**
  * Password Space MCP server (stdio).
  *
- * Humans unlock via CLI; this process reads the unlock session and exposes
- * metadata + inject tools. Prefer inject_secret over resolve_secret.
+ * Bundled for marketplace installs (`plugins/password-space/dist/index.js`).
+ * End users can init / unlock / store secrets via these tools — no separate
+ * monorepo clone required for day-1 setup. Prefer inject_secret over resolve_secret.
+ *
+ * Never log passphrases or secret values.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -14,6 +17,11 @@ import {
   injectSecretTool,
   listSecretsTool,
   resolveSecretTool,
+  vaultInitTool,
+  vaultLockTool,
+  vaultSetSecretTool,
+  vaultStatusTool,
+  vaultUnlockTool,
 } from "./tools.js";
 
 const dataDir =
@@ -32,6 +40,103 @@ const server = new McpServer({
   name: "password-space",
   version: "0.1.0",
 });
+
+server.tool(
+  "vault_status",
+  "Show whether the local vault is initialized and unlocked. Safe to call anytime; never returns secret values or the passphrase.",
+  {},
+  async () => {
+    try {
+      return withStore((store) => vaultStatusTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.tool(
+  "vault_init",
+  "Create a new encrypted vault. Pass passphrase as a tool argument (preferred: UI/agent secret prompt) or set PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat. Does not unlock — call vault_unlock next.",
+  {
+    passphrase: z
+      .string()
+      .optional()
+      .describe(
+        "Vault passphrase (min 8 chars). Prefer a secret prompt / tool arg — do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE.",
+      ),
+  },
+  async ({ passphrase }) => {
+    try {
+      return await withStore((store) => vaultInitTool(store, dataDir, { passphrase }));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.tool(
+  "vault_unlock",
+  "Unlock the vault for this machine session (writes a short-lived session file). Pass passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat.",
+  {
+    passphrase: z
+      .string()
+      .optional()
+      .describe(
+        "Unlock passphrase. Prefer a secret prompt / tool arg — do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE.",
+      ),
+    ttl_hours: z
+      .number()
+      .optional()
+      .describe("Session TTL in hours (default: 8)"),
+  },
+  async ({ passphrase, ttl_hours }) => {
+    try {
+      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.tool(
+  "vault_lock",
+  "Clear the unlock session so the vault is locked again.",
+  {},
+  async () => {
+    try {
+      return vaultLockTool(dataDir);
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.tool(
+  "vault_set_secret",
+  "Store or update a secret (name + value + optional tags). Pass the value as a tool argument — do NOT repeat the value in chat. Returns metadata only.",
+  {
+    name: z.string().describe("Secret name (e.g. GITHUB_TOKEN)"),
+    value: z
+      .string()
+      .describe(
+        "Secret value. Pass via tool arg / secret prompt only — never paste into chat or commit logs.",
+      ),
+    tags: z
+      .array(z.string())
+      .optional()
+      .describe("Optional tags for filtering (e.g. [\"api\", \"github\"])"),
+    notes: z.string().optional().describe("Optional non-secret notes"),
+  },
+  async ({ name, value, tags, notes }) => {
+    try {
+      return withStore((store) =>
+        vaultSetSecretTool(store, { name, value, tags, notes }),
+      );
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
 
 server.tool(
   "list_secrets",
@@ -117,6 +222,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
+  // Never dump full error objects that might carry tool args.
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

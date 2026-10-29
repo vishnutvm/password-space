@@ -4,11 +4,14 @@ Password Space is a local monorepo with three runtime packages plus Skill/Hook i
 
 ## Data flow
 
-1. **`password-space init`** — generate vault key; wrap with scrypt(passphrase); store salt + wrapped key + empty secrets table in `vault.db`.
-2. **`password-space unlock`** — derive master key; unwrap vault key; write TTL session file (`0600`).
-3. **CLI / MCP** — open DB; load session; decrypt secrets in process memory only as needed.
-4. **Agent path** — `inject_secret` writes `inject/<token>.env`; tool JSON returns handle + path, never the value.
-5. **Lock** — delete session; zero in-memory keys on process exit.
+1. **`vault_init` (MCP) or `password-space init` (CLI)** — generate vault key; wrap with scrypt(passphrase); store salt + wrapped key + empty secrets table in `vault.db`.
+2. **`vault_unlock` / `password-space unlock`** — derive master key; unwrap vault key; write TTL session file (`0600`).
+3. **MCP (bundled plugin) / CLI** — open DB; load session; decrypt secrets in process memory only as needed.
+4. **Store** — `vault_set_secret` (MCP) or CLI `set` encrypts values at rest (metadata-only tool results).
+5. **Agent path** — `inject_secret` writes `inject/<token>.env`; tool JSON returns handle + path, never the value.
+6. **Lock** — `vault_lock` / CLI `lock` deletes session; zero in-memory keys on process exit.
+
+Marketplace installs ship a self-contained MCP bundle (`plugins/password-space/dist/index.js`) so day-1 init/unlock/set does not require cloning the monorepo.
 
 ## Key hierarchy
 

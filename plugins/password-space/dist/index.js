@@ -21791,7 +21791,7 @@ var VaultStore = class {
   }
   requireKey() {
     if (!this.vaultKey) {
-      throw new VaultError("Vault is locked. Run: password-space unlock", "LOCKED");
+      throw new VaultError("Vault is locked. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
     }
     return this.vaultKey;
   }
@@ -21903,10 +21903,29 @@ var VaultStore = class {
 
 // packages/vault/dist/session.js
 import { chmodSync, existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname as dirname2 } from "node:path";
 var DEFAULT_TTL_MS = 8 * 60 * 60 * 1e3;
+function writeSession(sessionFilePath, vaultKey, dataDir2, ttlMs = DEFAULT_TTL_MS) {
+  mkdirSync2(dirname2(sessionFilePath), { recursive: true });
+  const fileKey = randomKey();
+  const wrapped = encrypt(vaultKey, fileKey);
+  const payload = {
+    version: 1,
+    expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+    dataDir: dataDir2,
+    fileKey: fileKey.toString("base64"),
+    wrappedVaultKey: packBlob(wrapped).toString("base64")
+  };
+  writeFileSync(sessionFilePath, JSON.stringify(payload), { mode: 384 });
+  try {
+    chmodSync(sessionFilePath, 384);
+  } catch {
+  }
+  fileKey.fill(0);
+}
 function readSession(sessionFilePath) {
   if (!existsSync2(sessionFilePath)) {
-    throw new VaultError("No unlock session. Run: password-space unlock", "LOCKED");
+    throw new VaultError("No unlock session. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
   }
   const raw = readFileSync(sessionFilePath, "utf8");
   let payload;
@@ -21920,7 +21939,7 @@ function readSession(sessionFilePath) {
   }
   if (new Date(payload.expiresAt).getTime() < Date.now()) {
     clearSession(sessionFilePath);
-    throw new VaultError("Unlock session expired. Run: password-space unlock", "LOCKED");
+    throw new VaultError("Unlock session expired. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
   }
   const fileKey = Buffer.from(payload.fileKey, "base64");
   if (fileKey.length !== KEY_LEN) {
@@ -22004,6 +22023,24 @@ function openVault(opts = {}) {
   }
   return store;
 }
+async function unlockVaultToSession(passphrase, opts = {}) {
+  const dataDir2 = opts.dataDir ?? defaultDataDir();
+  const store = new VaultStore(vaultDbPath(dataDir2));
+  try {
+    const vaultKey = await store.unlock(passphrase);
+    writeSession(sessionPath(dataDir2), vaultKey, dataDir2, opts.ttlMs);
+    const session = readSession(sessionPath(dataDir2));
+    vaultKey.fill(0);
+    session.vaultKey.fill(0);
+    return { expiresAt: session.expiresAt };
+  } finally {
+    store.close();
+  }
+}
+function lockVaultSession(opts = {}) {
+  const dataDir2 = opts.dataDir ?? defaultDataDir();
+  clearSession(sessionPath(dataDir2));
+}
 
 // packages/mcp-server/src/tools.ts
 function jsonResult(payload, opts) {
@@ -22013,6 +22050,94 @@ function jsonResult(payload, opts) {
     structuredContent: payload,
     ...opts?.redact ? { _meta: { redact_in_transcript: true } } : {}
   };
+}
+function resolvePassphrase(toolArg) {
+  const fromArg = toolArg?.trim();
+  if (fromArg) return fromArg;
+  const fromEnv = process.env.PASSWORD_SPACE_PASSPHRASE?.trim();
+  if (fromEnv) return fromEnv;
+  throw new Error(
+    "Passphrase required: pass the passphrase tool argument, or set PASSWORD_SPACE_PASSPHRASE (do not paste it into chat)."
+  );
+}
+function vaultStatusTool(store, dataDir2) {
+  const initialized = store.isInitialized();
+  const unlocked = store.isUnlocked;
+  const session = hasValidSession(sessionPath(dataDir2));
+  return jsonResult({
+    ok: true,
+    data_dir: dataDir2,
+    db_path: vaultDbPath(dataDir2),
+    initialized,
+    unlocked,
+    session,
+    secret_count: unlocked ? store.listSecrets().length : null,
+    next: !initialized ? "Call vault_init to create the vault (passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE)." : !unlocked ? "Call vault_unlock (passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE)." : "Vault ready. Use vault_set_secret / inject_secret as needed."
+  });
+}
+async function vaultInitTool(store, dataDir2, args) {
+  if (store.isInitialized()) {
+    return jsonResult({
+      ok: false,
+      error: "Vault already initialized",
+      data_dir: dataDir2,
+      hint: "Call vault_status or vault_unlock."
+    });
+  }
+  const passphrase = resolvePassphrase(args.passphrase);
+  await store.init(passphrase);
+  return jsonResult({
+    ok: true,
+    initialized: true,
+    data_dir: dataDir2,
+    db_path: vaultDbPath(dataDir2),
+    next: "Call vault_unlock with the same passphrase (or PASSWORD_SPACE_PASSPHRASE), then vault_set_secret.",
+    note: "Passphrase was not returned and must not be pasted into chat."
+  });
+}
+async function vaultUnlockTool(dataDir2, args) {
+  const passphrase = resolvePassphrase(args.passphrase);
+  const ttlHours = args.ttl_hours ?? 8;
+  const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1e3;
+  const { expiresAt } = await unlockVaultToSession(passphrase, { dataDir: dataDir2, ttlMs });
+  return jsonResult({
+    ok: true,
+    unlocked: true,
+    data_dir: dataDir2,
+    expires_at: expiresAt,
+    next: "Use vault_set_secret to store credentials, then inject_secret for agent use.",
+    note: "Passphrase was not returned and must not be pasted into chat."
+  });
+}
+function vaultLockTool(dataDir2) {
+  lockVaultSession({ dataDir: dataDir2 });
+  return jsonResult({
+    ok: true,
+    locked: true,
+    data_dir: dataDir2,
+    note: "Unlock session cleared."
+  });
+}
+function vaultSetSecretTool(store, args) {
+  assertUnlocked(store);
+  const meta = publicMeta(
+    store.setSecret({
+      name: args.name,
+      value: args.value,
+      tags: args.tags ?? [],
+      notes: args.notes ?? null
+    })
+  );
+  const payload = {
+    ok: true,
+    secret: meta,
+    note: "Secret stored. Value was not returned \u2014 do not repeat it in chat. Prefer inject_secret to use it."
+  };
+  const serialized = JSON.stringify(payload);
+  if (args.value && serialized.includes(args.value)) {
+    throw new Error("Refusing to return tool result that contains secret plaintext");
+  }
+  return jsonResult(payload, { redact: true });
 }
 function listSecretsTool(store, tag) {
   assertUnlocked(store);
@@ -22092,10 +22217,10 @@ function publicMeta(m) {
 }
 function assertUnlocked(store) {
   if (!store.isInitialized()) {
-    throw new Error("Vault not initialized. Run: password-space init");
+    throw new Error("Vault not initialized. Call vault_init (or CLI: password-space init)");
   }
   if (!store.isUnlocked) {
-    throw new Error("Vault is locked. A human must run: password-space unlock");
+    throw new Error("Vault is locked. Call vault_unlock (or CLI: password-space unlock)");
   }
 }
 
@@ -22113,6 +22238,84 @@ var server = new McpServer({
   name: "password-space",
   version: "0.1.0"
 });
+server.tool(
+  "vault_status",
+  "Show whether the local vault is initialized and unlocked. Safe to call anytime; never returns secret values or the passphrase.",
+  {},
+  async () => {
+    try {
+      return withStore((store) => vaultStatusTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.tool(
+  "vault_init",
+  "Create a new encrypted vault. Pass passphrase as a tool argument (preferred: UI/agent secret prompt) or set PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat. Does not unlock \u2014 call vault_unlock next.",
+  {
+    passphrase: external_exports.string().optional().describe(
+      "Vault passphrase (min 8 chars). Prefer a secret prompt / tool arg \u2014 do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE."
+    )
+  },
+  async ({ passphrase }) => {
+    try {
+      return await withStore((store) => vaultInitTool(store, dataDir, { passphrase }));
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.tool(
+  "vault_unlock",
+  "Unlock the vault for this machine session (writes a short-lived session file). Pass passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat.",
+  {
+    passphrase: external_exports.string().optional().describe(
+      "Unlock passphrase. Prefer a secret prompt / tool arg \u2014 do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE."
+    ),
+    ttl_hours: external_exports.number().optional().describe("Session TTL in hours (default: 8)")
+  },
+  async ({ passphrase, ttl_hours }) => {
+    try {
+      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.tool(
+  "vault_lock",
+  "Clear the unlock session so the vault is locked again.",
+  {},
+  async () => {
+    try {
+      return vaultLockTool(dataDir);
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.tool(
+  "vault_set_secret",
+  "Store or update a secret (name + value + optional tags). Pass the value as a tool argument \u2014 do NOT repeat the value in chat. Returns metadata only.",
+  {
+    name: external_exports.string().describe("Secret name (e.g. GITHUB_TOKEN)"),
+    value: external_exports.string().describe(
+      "Secret value. Pass via tool arg / secret prompt only \u2014 never paste into chat or commit logs."
+    ),
+    tags: external_exports.array(external_exports.string()).optional().describe('Optional tags for filtering (e.g. ["api", "github"])'),
+    notes: external_exports.string().optional().describe("Optional non-secret notes")
+  },
+  async ({ name, value, tags, notes }) => {
+    try {
+      return withStore(
+        (store) => vaultSetSecretTool(store, { name, value, tags, notes })
+      );
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
 server.tool(
   "list_secrets",
   "List secret names, ids, and tags. Never returns secret values. Use before inject_secret.",
@@ -22185,7 +22388,7 @@ async function main() {
   await server.connect(transport);
 }
 main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
 //# sourceMappingURL=index.js.map
