@@ -13,12 +13,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { defaultDataDir, openVault } from "@password-space/vault";
 import {
+  PassphraseRequiredError,
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
   resolveSecretTool,
   vaultInitTool,
   vaultLockTool,
+  vaultOnboardTool,
   vaultSetSecretTool,
   vaultStatusTool,
   vaultUnlockTool,
@@ -36,15 +38,45 @@ function withStore<T>(fn: (store: ReturnType<typeof openVault>) => T): T {
   }
 }
 
+const passphraseSchema = z
+  .string()
+  .min(8, "Passphrase must be at least 8 characters.")
+  .describe(
+    "Your vault passphrase (8+ characters). Enter here in the MCP approval form — do not paste into chat. Optional if PASSWORD_SPACE_PASSPHRASE is set in MCP Environment.",
+  );
+
+const optionalPassphraseShape = {
+  passphrase: passphraseSchema.optional(),
+};
+
 const server = new McpServer({
   name: "password-space",
   version: "0.1.0",
 });
 
-server.tool(
+server.registerTool(
+  "vault_onboard",
+  {
+    title: "Password Space setup guide",
+    description:
+      "Start here if setup feels stuck. Returns a plain-English checklist (no secrets). Safe when vault_init failed because the passphrase field was empty.",
+  },
+  async () => {
+    try {
+      return withStore((store) => vaultOnboardTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
   "vault_status",
-  "Show whether the local vault is initialized and unlocked. Safe to call anytime; never returns secret values or the passphrase.",
-  {},
+  {
+    title: "Password Space status",
+    description:
+      "See whether your vault is created and unlocked, plus what to do next. Safe anytime — never returns passwords or secret values.",
+  },
   async () => {
     try {
       return withStore((store) => vaultStatusTool(store, dataDir));
@@ -54,16 +86,13 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   "vault_init",
-  "Create a new encrypted vault. Pass passphrase as a tool argument (preferred: UI/agent secret prompt) or set PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat. Does not unlock — call vault_unlock next.",
   {
-    passphrase: z
-      .string()
-      .optional()
-      .describe(
-        "Vault passphrase (min 8 chars). Prefer a secret prompt / tool arg — do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE.",
-      ),
+    title: "Create Password Space vault",
+    description:
+      "First-time setup: creates an encrypted vault on this computer. You must enter a passphrase (8+ chars) in the approval form — approving with empty {} will fail. Does not unlock; call vault_unlock next.",
+    inputSchema: optionalPassphraseShape,
   },
   async ({ passphrase }) => {
     try {
@@ -74,20 +103,21 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   "vault_unlock",
-  "Unlock the vault for this machine session (writes a short-lived session file). Pass passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat.",
   {
-    passphrase: z
-      .string()
-      .optional()
-      .describe(
-        "Unlock passphrase. Prefer a secret prompt / tool arg — do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE.",
-      ),
-    ttl_hours: z
-      .number()
-      .optional()
-      .describe("Session TTL in hours (default: 8)"),
+    title: "Unlock Password Space",
+    description:
+      "Unlocks the vault for several hours so the agent can store and use credentials. Enter the same passphrase in the approval form (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment).",
+    inputSchema: {
+      ...optionalPassphraseShape,
+      ttl_hours: z
+        .number()
+        .min(0.1)
+        .max(168)
+        .optional()
+        .describe("How long to stay unlocked in hours (default 8, max 168)."),
+    },
   },
   async ({ passphrase, ttl_hours }) => {
     try {
@@ -100,7 +130,7 @@ server.tool(
 
 server.tool(
   "vault_lock",
-  "Clear the unlock session so the vault is locked again.",
+  "Lock Password Space — clears the unlock session on this machine.",
   {},
   async () => {
     try {
@@ -111,21 +141,29 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   "vault_set_secret",
-  "Store or update a secret (name + value + optional tags). Pass the value as a tool argument — do NOT repeat the value in chat. Returns metadata only.",
   {
-    name: z.string().describe("Secret name (e.g. GITHUB_TOKEN)"),
-    value: z
-      .string()
-      .describe(
-        "Secret value. Pass via tool arg / secret prompt only — never paste into chat or commit logs.",
-      ),
-    tags: z
-      .array(z.string())
-      .optional()
-      .describe("Optional tags for filtering (e.g. [\"api\", \"github\"])"),
-    notes: z.string().optional().describe("Optional non-secret notes"),
+    title: "Save a password or API token",
+    description:
+      "Stores a credential in your vault. Fill name and value in the MCP approval form — never paste the value into chat. Returns only metadata.",
+    inputSchema: {
+      name: z
+        .string()
+        .min(1)
+        .describe("Short label for this credential (e.g. GITHUB_TOKEN, OpenAI API key)."),
+      value: z
+        .string()
+        .min(1)
+        .describe(
+          "The secret itself (token, password, API key). Enter in the approval form only — never in chat.",
+        ),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe('Optional labels for filtering (e.g. ["api", "github"]).'),
+      notes: z.string().optional().describe("Optional reminder text (not secret)."),
+    },
   },
   async ({ name, value, tags, notes }) => {
     try {
@@ -140,7 +178,7 @@ server.tool(
 
 server.tool(
   "list_secrets",
-  "List secret names, ids, and tags. Never returns secret values. Use before inject_secret.",
+  "List saved credential names (no values). Use before inject_secret.",
   {
     tag: z.string().optional().describe("Optional tag filter"),
   },
@@ -155,7 +193,7 @@ server.tool(
 
 server.tool(
   "get_secret_metadata",
-  "Get metadata for one secret by name or id. Never returns the secret value.",
+  "Get details for one saved credential by name. Never returns the secret value.",
   {
     name: z.string().describe("Secret name or id"),
   },
@@ -170,7 +208,7 @@ server.tool(
 
 server.tool(
   "inject_secret",
-  "PREFERRED agent access: write secret to a short-lived local env file and return a handle + path. Do NOT read the file into chat. Set redact_in_transcript on any display.",
+  "PREFERRED: let the agent use a credential without putting it in chat — writes a short-lived local env file and returns a handle. Do NOT read the file into chat.",
   {
     name: z.string().describe("Secret name or id"),
     env_var: z
@@ -189,7 +227,7 @@ server.tool(
 
 server.tool(
   "resolve_secret",
-  "LAST RESORT: return plaintext in the tool result with redact_in_transcript=true. Prefer inject_secret. Requires confirm_redaction=true.",
+  "LAST RESORT: returns plaintext in the tool result. Prefer inject_secret. Requires confirm_redaction=true.",
   {
     name: z.string().describe("Secret name or id"),
     confirm_redaction: z
@@ -210,8 +248,25 @@ server.tool(
 
 function errorResult(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
+  const payload: Record<string, unknown> = { ok: false, error: message };
+
+  if (err instanceof PassphraseRequiredError) {
+    payload.code = err.code;
+    payload.what_happened =
+      "Cursor approved the tool without a passphrase (empty approval is not enough).";
+    payload.what_to_do = [
+      "Open the tool again and type your passphrase in the passphrase field before approving.",
+      "Or add PASSWORD_SPACE_PASSPHRASE in Cursor → Settings → MCP → password-space → Environment.",
+      "Call vault_onboard for a full checklist — never paste the passphrase into chat.",
+    ];
+  } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
+    payload.code = "passphrase_too_short";
+    payload.what_to_do = ["Use at least 8 characters for your vault passphrase."];
+  }
+
   return {
-    content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: message }, null, 2) }],
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload,
     isError: true,
   };
 }
@@ -222,7 +277,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // Never dump full error objects that might carry tool args.
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

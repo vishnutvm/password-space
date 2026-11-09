@@ -109,6 +109,7 @@ Usage:
   password-space <command> [options]
 
 Commands:
+  onboard              Print setup steps (same checklist as vault_onboard)
   init                 Create a new encrypted vault
   unlock               Unlock vault for this machine session
   lock                 Clear unlock session
@@ -154,6 +155,40 @@ async function main(): Promise<void> {
       case "-h":
         printHelp();
         break;
+
+      case "onboard": {
+        const store = openVault({ dataDir, useSession: true });
+        const initialized = store.isInitialized();
+        const unlocked = store.isUnlocked;
+        const session = hasValidSession(sessionPath(dataDir));
+        store.close();
+        const steps = [
+          { title: "Check status", done: true, cmd: "password-space status" },
+          {
+            title: "Create vault (first time)",
+            done: initialized,
+            cmd: "password-space init",
+          },
+          {
+            title: "Unlock for this session",
+            done: unlocked && session,
+            cmd: "password-space unlock",
+          },
+          { title: "Store a secret", done: false, cmd: "password-space set NAME" },
+        ];
+        console.log("Password Space setup checklist\n");
+        for (const s of steps) {
+          const mark = s.done ? "[x]" : "[ ]";
+          console.log(`${mark} ${s.title}  →  ${s.cmd}`);
+        }
+        console.log(
+          "\nIn Cursor, prefer MCP vault_onboard / setup-password-space — passphrases stay out of chat.",
+        );
+        if (!initialized) console.log("Next: password-space init");
+        else if (!unlocked) console.log("Next: password-space unlock");
+        else console.log("Next: password-space set <NAME>");
+        break;
+      }
 
       case "init": {
         const store = openVault({ dataDir, useSession: false });

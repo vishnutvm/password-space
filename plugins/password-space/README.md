@@ -12,19 +12,21 @@ Local encrypted credential vault for Cursor agents. Secrets stay out of chat: ag
 
 ## After install (primary path)
 
-No `git clone` or `pnpm` required for day-1 setup. Ask the agent, for example:
+No `git clone` or `pnpm` required.
 
-> Set up Password Space: check vault status, init if needed, unlock, then store my API token.
+1. In chat, run **`/setup-password-space`** or ask: *“Set up Password Space using the onboarding checklist.”*
+2. When Cursor shows an **MCP tool approval** for `vault_init` or `vault_unlock`, type your **passphrase** in the form field (8+ characters). **Do not approve with an empty form** — that is the most common setup failure.
+3. Optional: **Cursor → Settings → MCP → password-space → Environment** → set `PASSWORD_SPACE_PASSPHRASE` so you are not prompted on every unlock (never paste it into chat).
 
-The agent should call:
+Agent flow:
 
-1. `vault_status`
-2. `vault_init` (passphrase via tool arg / UI prompt or `PASSWORD_SPACE_PASSPHRASE` — **not** chat)
+1. `vault_onboard` or `vault_status`
+2. `vault_init` → passphrase in approval form only
 3. `vault_unlock`
-4. `vault_set_secret` (value via tool arg — **not** chat)
-5. `inject_secret` when a credential is needed
+4. `vault_set_secret` → name + value in approval form only
+5. `inject_secret` when needed
 
-Vault home defaults to `~/.password-space` in code. There is no Plugins → Configure variable (so Configure does not need a JSON Schema). Override only via a real absolute `PASSWORD_SPACE_HOME` in the process environment or a hand-written MCP `env` block — never an unresolved `${PASSWORD_SPACE_HOME}` placeholder.
+Vault home defaults to `~/.password-space`. Override with `PASSWORD_SPACE_HOME` in MCP Environment (absolute path). Plugin **Configure** has no `variables` block (Cursor schema limitation) — use MCP Environment instead.
 
 ## MCP tools
 

@@ -65,17 +65,17 @@ Day-1 setup does **not** require `git clone` or `pnpm`.
 3. Paste: `https://github.com/vishnutvm/password-space`
 4. Install the **password-space** plugin.
 5. Optional custom vault path: set a **real** `PASSWORD_SPACE_HOME` (absolute path) in the environment or a hand-written MCP `env` block. Leave it unset to use `~/.password-space`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default.
-6. Ask the agent, for example:
+6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`** and walk you through the checklist.
 
-   > Set up Password Space for me: check status, init the vault if needed, unlock it, then store my API token.
+7. When Cursor approves `vault_init` / `vault_unlock`, fill in the **passphrase** field (8+ characters). Approving with an empty form does not work.
 
-The Skill drives this MCP flow:
+8. Optional: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (so you are not prompted every time; never paste it into chat).
 
 ```text
-vault_status → vault_init (if needed) → vault_unlock → vault_set_secret → inject_secret
+vault_onboard → vault_init (if needed) → vault_unlock → vault_set_secret → inject_secret
 ```
 
-Pass the **passphrase** and **secret values** only as MCP tool arguments (or UI secret prompts / `PASSWORD_SPACE_PASSPHRASE`). **Never** paste them into chat.
+Pass **passphrase** and **secret values** only in MCP approval forms or MCP Environment — **never** in chat.
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
