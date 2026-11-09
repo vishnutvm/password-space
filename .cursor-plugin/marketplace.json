@@ -12,7 +12,8 @@
     {
       "name": "password-space",
       "source": "./plugins/password-space",
-      "description": "Local encrypted vault for AI agents — inject secrets via MCP, never paste them in chat"
+      "description": "Local encrypted vault for AI agents — inject secrets via MCP, never paste them in chat",
+      "logo": "plugins/password-space/assets/logo.svg"
     }
   ]
 }
