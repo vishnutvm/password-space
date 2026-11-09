@@ -18,5 +18,5 @@
     "security",
     "inject"
   ],
-  "logo": "assets/logo.svg"
+  "logo": "https://raw.githubusercontent.com/vishnutvm/password-space/main/plugins/password-space/assets/logo.svg"
 }
