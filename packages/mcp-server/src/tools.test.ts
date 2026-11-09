@@ -136,7 +136,13 @@ describe("vault lifecycle MCP tools", () => {
     };
     expect(parsed.checklist.length).toBeGreaterThan(3);
     expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
-    expect(parsed.human_summary).toMatch(/not set up/i);
+    expect(parsed.human_summary).toMatch(/Welcome|Password Space/i);
+    const withProgress = JSON.parse(result.content[0]!.text) as {
+      progress: { phase: string };
+      trust_line: string;
+    };
+    expect(withProgress.progress.phase).toMatch(/\d\/4/);
+    expect(withProgress.trust_line).toMatch(/encrypted/i);
     store.close();
   });
 

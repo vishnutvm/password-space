@@ -1,7 +1,7 @@
 {
   "name": "password-space",
   "version": "0.1.0",
-  "description": "Local credential vault for humans and AI agents — secrets via MCP inject, never in chat.",
+  "description": "Your private credential vault for Cursor — encrypted on your device, built so agents never need secrets in chat.",
   "author": {
     "name": "Vishnu",
     "email": "vishnutvm@users.noreply.github.com"

@@ -1,22 +1,30 @@
 ---
-description: Set up Password Space — create vault, unlock, and save your first credential (passphrase stays out of chat)
+description: Guided Password Space setup — local, encrypted, credentials never pasted in chat
 ---
 
-You are helping a **non-technical** user finish Password Space setup. Never ask them to paste a passphrase or API token into this chat.
+Help the user complete **Password Space** setup with a calm, product-quality tone. **Never** ask for a passphrase or token in chat.
 
-1. Call **`vault_onboard`** (or **`vault_status`**) and summarize the checklist in plain English.
+## Open
 
-2. If the vault is not created yet:
-   - Explain that Cursor will show an **approval dialog** for `vault_init`.
-   - Tell them to type a **passphrase** (8+ characters) in the **passphrase** field on that form, then approve — **not** an empty approval.
-   - Run **`vault_init`** with their passphrase supplied only via the tool approval form (or `PASSWORD_SPACE_PASSPHRASE` if already configured in MCP Environment).
+1. Call **`vault_onboard`**.
+2. Share **`human_summary`**, **`progress.step_of`**, and **`trust_line`** in one short paragraph.
 
-3. Run **`vault_unlock`** the same way (passphrase in the approval form only).
+## Walk the four steps
 
-4. To store a token, run **`vault_set_secret`** with **name** and **value** in the approval form only.
+| Phase | Tool | Tell the user |
+| --- | --- | --- |
+| 1/4 Welcome | — | "We'll set up a private vault on your Mac in a few approvals." |
+| 2/4 Secure | `vault_init` | "Cursor will ask to run a tool — enter your passphrase there (8+ characters)." |
+| 3/4 Unlock | `vault_unlock` | "Same passphrase in the next approval form." |
+| 4/4 Save | `vault_set_secret` | "Add a label and your token in the form only — not here in chat." |
 
-5. Optional power user tip (one sentence): they can set **`PASSWORD_SPACE_PASSPHRASE`** in **Cursor → Settings → MCP → password-space → Environment** so they do not re-type the passphrase on every unlock.
+After each tool, confirm with **`vault_status`** (counts only — no secret values).
 
-6. Confirm success using **`vault_status`** — report initialized, unlocked, and secret count without echoing any secret values.
+## If something failed
 
-If setup failed earlier because they approved `vault_init` with `{}`, explain that the passphrase field was empty and repeat step 2 with the field filled in.
+- Empty approval → explain gently: fill the passphrase field, run **`vault_onboard`** again.
+- Use error **`howToFix`** when present; do not dump raw JSON.
+
+## Close
+
+Confirm initialized + unlocked. Mention **`inject_secret`** for day-to-day use and **`vault_lock`** when finished.

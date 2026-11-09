@@ -57,9 +57,9 @@ const server = new McpServer({
 server.registerTool(
   "vault_onboard",
   {
-    title: "Password Space setup guide",
+    title: "Get started with Password Space",
     description:
-      "Start here if setup feels stuck. Returns a plain-English checklist (no secrets). Safe when vault_init failed because the passphrase field was empty.",
+      "Guided setup in four steps — local, encrypted, nothing sensitive in the response. Best first call after install.",
   },
   async () => {
     try {
@@ -75,7 +75,7 @@ server.registerTool(
   {
     title: "Password Space status",
     description:
-      "See whether your vault is created and unlocked, plus what to do next. Safe anytime — never returns passwords or secret values.",
+      "Quick health check: vault created, unlocked, and your next step. Never returns passphrases or secret values.",
   },
   async () => {
     try {
@@ -89,9 +89,9 @@ server.registerTool(
 server.registerTool(
   "vault_init",
   {
-    title: "Create Password Space vault",
+    title: "Create your vault",
     description:
-      "First-time setup: creates an encrypted vault on this computer. You must enter a passphrase (8+ chars) in the approval form — approving with empty {} will fail. Does not unlock; call vault_unlock next.",
+      "Step 2 of setup: creates an encrypted vault on this device. Enter your passphrase in the approval form (8+ characters), then call vault_unlock.",
     inputSchema: optionalPassphraseShape,
   },
   async ({ passphrase }) => {
@@ -106,9 +106,9 @@ server.registerTool(
 server.registerTool(
   "vault_unlock",
   {
-    title: "Unlock Password Space",
+    title: "Unlock your vault",
     description:
-      "Unlocks the vault for several hours so the agent can store and use credentials. Enter the same passphrase in the approval form (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment).",
+      "Step 3 of setup: unlocks for this session so you can save and use credentials. Same passphrase in the approval form.",
     inputSchema: {
       ...optionalPassphraseShape,
       ttl_hours: z
@@ -252,16 +252,22 @@ function errorResult(err: unknown) {
 
   if (err instanceof PassphraseRequiredError) {
     payload.code = err.code;
-    payload.what_happened =
-      "Cursor approved the tool without a passphrase (empty approval is not enough).";
+    payload.howToFix =
+      "Open the approval form again, enter your vault passphrase, then approve.";
+    payload.what_happened = "The passphrase field was empty.";
     payload.what_to_do = [
-      "Open the tool again and type your passphrase in the passphrase field before approving.",
-      "Or add PASSWORD_SPACE_PASSPHRASE in Cursor → Settings → MCP → password-space → Environment.",
-      "Call vault_onboard for a full checklist — never paste the passphrase into chat.",
+      "Type your passphrase in the approval form — don't approve with empty fields.",
+      "Optional: Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE.",
+      "Run vault_onboard for the full guided checklist.",
     ];
   } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
     payload.code = "passphrase_too_short";
-    payload.what_to_do = ["Use at least 8 characters for your vault passphrase."];
+    payload.howToFix = "Choose a passphrase with at least 8 characters, then try again.";
+    payload.what_to_do = ["Use 8 or more characters for your vault passphrase."];
+  } else if (/locked/i.test(message)) {
+    payload.howToFix = "Run vault_unlock and enter your passphrase in the approval form.";
+  } else if (/not set up|not initialized/i.test(message)) {
+    payload.howToFix = "Run vault_onboard, then vault_init to create your vault.";
   }
 
   return {
