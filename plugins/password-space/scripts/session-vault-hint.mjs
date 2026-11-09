@@ -28,11 +28,8 @@ function main() {
   console.log(
     JSON.stringify({
       continue: true,
-      additional_context: [
-        "Password Space: no local vault yet on this machine.",
-        "If the user wants credentials stored safely for the agent, run vault_onboard or use the /setup-password-space command.",
-        "Passphrases and secret values must go in MCP tool approval forms or PASSWORD_SPACE_PASSPHRASE — never in chat.",
-      ].join(" "),
+      additional_context:
+        "Password Space is installed but not set up yet — offer a short guided setup with vault_onboard or /setup-password-space (passphrases only in tool approval forms, never in chat).",
     }),
   );
 }

@@ -1,54 +1,37 @@
-# Password Space (Cursor plugin)
+# Password Space
 
-Local encrypted credential vault for Cursor agents. Secrets stay out of chat: agents use MCP `inject_secret` and handles like `ps://NAME`.
+**A private credential vault for Cursor** — encrypted on your Mac, designed so agents never need your secrets in chat.
 
-## What this plugin includes
+[Getting started in 2 minutes](../../docs/onboarding.md)
 
-| Component | Role |
+## What's included
+
+| Piece | Purpose |
 | --- | --- |
-| MCP (`dist/index.js`) | Self-contained vault + MCP tools (init/unlock/store/list/inject) |
-| Skill | Onboarding via MCP; prefer inject; never paste secrets in chat |
-| Hook | `beforeSubmitPrompt` redaction via `scripts/redact.mjs` |
+| MCP server | Create, unlock, store, and inject credentials |
+| Skill + `/setup-password-space` | Guided setup in plain language |
+| Hooks | Gentle welcome when no vault yet; redaction before send |
 
-## After install (primary path)
+## After install
 
-No `git clone` or `pnpm` required.
+1. In chat: **`/setup-password-space`** or *"Set up Password Space."*
+2. When Cursor shows **Run tool**, enter your **passphrase** in the form (8+ characters).
+3. Optional: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never in chat).
 
-1. In chat, run **`/setup-password-space`** or ask: *“Set up Password Space using the onboarding checklist.”*
-2. When Cursor shows an **MCP tool approval** for `vault_init` or `vault_unlock`, type your **passphrase** in the form field (8+ characters). **Do not approve with an empty form** — that is the most common setup failure.
-3. Optional: **Cursor → Settings → MCP → password-space → Environment** → set `PASSWORD_SPACE_PASSPHRASE` so you are not prompted on every unlock (never paste it into chat).
+**Trust:** Local encryption. Passphrases and tokens stay out of the conversation.
 
-Agent flow:
+Default vault folder: `~/.password-space`. Override with `PASSWORD_SPACE_HOME` in MCP Environment.
 
-1. `vault_onboard` or `vault_status`
-2. `vault_init` → passphrase in approval form only
-3. `vault_unlock`
-4. `vault_set_secret` → name + value in approval form only
-5. `inject_secret` when needed
+## MCP tools (essentials)
 
-Vault home defaults to `~/.password-space`. Override with `PASSWORD_SPACE_HOME` in MCP Environment (absolute path). Plugin **Configure** has no `variables` block (Cursor schema limitation) — use MCP Environment instead.
+| Tool | Returns secrets? |
+| --- | --- |
+| `vault_onboard` | No — start here |
+| `vault_status` | No |
+| `vault_init` / `vault_unlock` | No |
+| `vault_set_secret` | No (metadata only) |
+| `inject_secret` | No — **preferred** for agents |
 
-## MCP tools
-
-| Tool | Returns secret value? | Use |
-| --- | --- | --- |
-| `vault_status` | No | Initialized? Unlocked? |
-| `vault_init` | No | Create vault |
-| `vault_unlock` / `vault_lock` | No | Session unlock / lock |
-| `vault_set_secret` | No (metadata only) | Store/update secrets |
-| `list_secrets` | No | Discover names / ids / tags |
-| `get_secret_metadata` | No | One secret’s metadata |
-| `inject_secret` | **No** (writes env file) | **Preferred** agent access |
-| `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |
-
-## Optional CLI (power users)
-
-From a local clone of this repo: `pnpm install && pnpm build`, then `pnpm password-space …`. See the [root README](../../README.md).
-
-## Manual MCP (without marketplace)
-
-See the [root README](../../README.md) for a hand-written `mcp.json` pointing at `plugins/password-space/dist/index.js`.
-
-## License
+Power users: [root README](../../README.md) · CLI · manual MCP config.
 
 MIT

@@ -58,6 +58,8 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 
 ## Quickstart (Cursor plugin — primary)
 
+**[Getting started in 2 minutes](./docs/onboarding.md)** — install, four setup steps, trust model.
+
 Day-1 setup does **not** require `git clone` or `pnpm`.
 
 1. Open **Cursor Settings → Customize** (or **Dashboard → Plugins & MCPs** for team marketplaces).

@@ -34,11 +34,37 @@ export class PassphraseRequiredError extends Error {
   readonly code = "passphrase_missing" as const;
 
   constructor() {
-    super(
-      "Your vault passphrase is required for this step. Enter it in the MCP approval form (passphrase field), or set PASSWORD_SPACE_PASSPHRASE in Cursor Settings → MCP → password-space → Environment. Do not type the passphrase in chat.",
-    );
+    super("This step needs your vault passphrase in the tool approval form.");
     this.name = "PassphraseRequiredError";
   }
+}
+
+const TRUST_LINE =
+  "Your secrets stay encrypted on this device. Passphrases and tokens never belong in chat.";
+
+export function onboardingProgress(
+  initialized: boolean,
+  unlocked: boolean,
+): { phase: string; headline: string; step_of: string } {
+  if (!initialized) {
+    return {
+      phase: "2/4",
+      headline: "Create your encrypted vault",
+      step_of: "Step 2 of 4 · Secure your vault",
+    };
+  }
+  if (!unlocked) {
+    return {
+      phase: "3/4",
+      headline: "Unlock your vault",
+      step_of: "Step 3 of 4 · Unlock for this session",
+    };
+  }
+  return {
+    phase: "4/4",
+    headline: "Add your credentials",
+    step_of: "Step 4 of 4 · Save and use secrets safely",
+  };
 }
 
 /** Whether PASSWORD_SPACE_PASSPHRASE is set (does not expose the value). */
@@ -70,6 +96,7 @@ export function resolvePassphrase(toolArg?: string): string {
 
 export type OnboardingStep = {
   id: string;
+  phase: string;
   title: string;
   done: boolean;
   tool?: string;
@@ -83,50 +110,56 @@ export function buildOnboardingSteps(
 ): OnboardingStep[] {
   const envPassphrase = isPassphraseConfiguredInEnv();
   const passphraseHint = envPassphrase
-    ? "Passphrase can come from PASSWORD_SPACE_PASSPHRASE (already set) or the approval form."
-    : "In the MCP approval dialog, fill in the passphrase field — do not approve with empty {}.";
+    ? "Your passphrase can load from MCP Environment, or you can type it in the approval form."
+    : "When Cursor asks to approve the tool, enter your passphrase in the form — not an empty approval.";
 
   return [
     {
       id: "check",
-      title: "Check vault status",
+      phase: "1/4",
+      title: "Welcome",
       done: true,
-      tool: "vault_status",
+      tool: "vault_onboard",
+      user_action: "You're in the right place. We'll guide you through four short steps.",
     },
     {
       id: "init",
-      title: "Create your vault (first time only)",
+      phase: "2/4",
+      title: "Secure your vault",
       done: initialized,
       tool: "vault_init",
       user_action: initialized
         ? undefined
-        : `Choose a passphrase (8+ characters). ${passphraseHint}`,
+        : `Pick a passphrase you'll remember (8+ characters). ${passphraseHint}`,
     },
     {
       id: "unlock",
-      title: "Unlock the vault for this session",
+      phase: "3/4",
+      title: "Unlock for this session",
       done: unlocked && session,
       tool: "vault_unlock",
       user_action:
         initialized && !(unlocked && session)
-          ? `Use the same passphrase. ${passphraseHint}`
+          ? `Enter the same passphrase. ${passphraseHint}`
           : undefined,
     },
     {
       id: "store",
-      title: "Store a credential",
+      phase: "4/4",
+      title: "Save a credential",
       done: false,
       tool: "vault_set_secret",
       user_action: unlocked
-        ? "Provide name + value in the approval form (never paste the value into chat)."
-        : "Complete unlock first.",
+        ? "Add a name and value in the approval form only — never in chat."
+        : "Unlock first, then save your token or password.",
     },
     {
       id: "use",
-      title: "Use a credential via the agent",
+      phase: "4/4",
+      title: "Use with your agent",
       done: false,
       tool: "inject_secret",
-      user_action: "Agent reads a short-lived env file — the secret value stays out of chat.",
+      user_action: "Your agent uses the secret without showing it in the conversation.",
     },
   ];
 }
@@ -139,6 +172,13 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
   const nextIncomplete = steps.find((s) => !s.done && s.id !== "check" && s.id !== "use" && s.id !== "store");
   const ready = initialized && unlocked;
 
+  const progress = onboardingProgress(initialized, unlocked);
+  const human_summary = !initialized
+    ? "Welcome to Password Space. Let's create your private vault on this device."
+    : !unlocked
+      ? "Your vault is ready. Unlock it to store and use credentials."
+      : "You're protected. Save a credential whenever you're ready.";
+
   return jsonResult({
     ok: true,
     data_dir: dataDir,
@@ -146,18 +186,15 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     unlocked,
     session,
     passphrase_env_configured: isPassphraseConfiguredInEnv(),
+    trust_line: TRUST_LINE,
+    progress,
     checklist: steps,
-    human_summary: !initialized
-      ? "Your Password Space vault is not set up yet."
-      : !unlocked
-        ? "Vault exists but is locked."
-        : "Vault is ready — you can store and inject secrets.",
-    next_tool: ready
-      ? "vault_set_secret"
-      : (nextIncomplete?.tool ?? "vault_status"),
-    next_steps: steps
-      .filter((s) => !s.done)
-      .map((s) => (s.user_action ? `${s.title}: ${s.user_action}` : s.title)),
+    human_summary,
+    next_tool: ready ? "vault_set_secret" : (nextIncomplete?.tool ?? "vault_status"),
+    what_to_do: steps
+      .filter((s) => !s.done && s.user_action)
+      .slice(0, 2)
+      .map((s) => `${s.phase} ${s.title}: ${s.user_action}`),
     never_paste_in_chat: ["passphrase", "secret values"],
   });
 }
@@ -169,11 +206,12 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
   const steps = buildOnboardingSteps(initialized, unlocked, session);
   const passphraseEnv = isPassphraseConfiguredInEnv();
 
+  const progress = onboardingProgress(initialized, unlocked);
   const next = !initialized
-    ? "Run vault_init with your passphrase in the MCP approval form (or PASSWORD_SPACE_PASSPHRASE). Do not approve empty {}."
+    ? "Next: vault_init — enter your passphrase in the approval form when prompted."
     : !unlocked
-      ? "Run vault_unlock with the same passphrase in the approval form (or PASSWORD_SPACE_PASSPHRASE)."
-      : "Vault ready. Use vault_set_secret, then inject_secret when you need a credential.";
+      ? "Next: vault_unlock — same passphrase, approval form only."
+      : "You're ready. Use vault_set_secret, then inject_secret when needed.";
 
   return jsonResult({
     ok: true,
@@ -184,14 +222,18 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
     session,
     secret_count: unlocked ? store.listSecrets().length : null,
     passphrase_env_configured: passphraseEnv,
+    trust_line: TRUST_LINE,
+    progress,
+    headline: progress.headline,
     next,
     next_steps: steps.filter((s) => !s.done).map((s) => ({
+      phase: s.phase,
       step: s.title,
       tool: s.tool,
       action: s.user_action,
     })),
     tip: !passphraseEnv && (!initialized || !unlocked)
-      ? "Set PASSWORD_SPACE_PASSPHRASE in Cursor → Settings → MCP → password-space → Environment to skip typing the passphrase on each tool call."
+      ? "Optional: add PASSWORD_SPACE_PASSPHRASE under Settings → MCP → password-space → Environment to approve faster."
       : undefined,
   });
 }
