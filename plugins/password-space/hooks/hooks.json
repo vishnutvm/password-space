@@ -1,5 +1,11 @@
 {
+  "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "command": "./scripts/session-vault-hint.mjs"
+      }
+    ],
     "beforeSubmitPrompt": [
       {
         "command": "./scripts/redact.mjs"

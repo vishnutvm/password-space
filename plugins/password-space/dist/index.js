@@ -22063,19 +22063,103 @@ function jsonResult(payload, opts) {
     ...opts?.redact ? { _meta: { redact_in_transcript: true } } : {}
   };
 }
+var PassphraseRequiredError = class extends Error {
+  code = "passphrase_missing";
+  constructor() {
+    super(
+      "Your vault passphrase is required for this step. Enter it in the MCP approval form (passphrase field), or set PASSWORD_SPACE_PASSPHRASE in Cursor Settings \u2192 MCP \u2192 password-space \u2192 Environment. Do not type the passphrase in chat."
+    );
+    this.name = "PassphraseRequiredError";
+  }
+};
+function isPassphraseConfiguredInEnv() {
+  return Boolean(process.env.PASSWORD_SPACE_PASSPHRASE?.trim());
+}
 function resolvePassphrase(toolArg) {
   const fromArg = toolArg?.trim();
-  if (fromArg) return fromArg;
+  if (fromArg) {
+    if (fromArg.length < 8) {
+      throw new Error("Passphrase must be at least 8 characters.");
+    }
+    return fromArg;
+  }
   const fromEnv = process.env.PASSWORD_SPACE_PASSPHRASE?.trim();
-  if (fromEnv) return fromEnv;
-  throw new Error(
-    "Passphrase required: pass the passphrase tool argument, or set PASSWORD_SPACE_PASSPHRASE (do not paste it into chat)."
-  );
+  if (fromEnv) {
+    if (fromEnv.length < 8) {
+      throw new Error("PASSWORD_SPACE_PASSPHRASE must be at least 8 characters.");
+    }
+    return fromEnv;
+  }
+  throw new PassphraseRequiredError();
+}
+function buildOnboardingSteps(initialized, unlocked, session) {
+  const envPassphrase = isPassphraseConfiguredInEnv();
+  const passphraseHint = envPassphrase ? "Passphrase can come from PASSWORD_SPACE_PASSPHRASE (already set) or the approval form." : "In the MCP approval dialog, fill in the passphrase field \u2014 do not approve with empty {}.";
+  return [
+    {
+      id: "check",
+      title: "Check vault status",
+      done: true,
+      tool: "vault_status"
+    },
+    {
+      id: "init",
+      title: "Create your vault (first time only)",
+      done: initialized,
+      tool: "vault_init",
+      user_action: initialized ? void 0 : `Choose a passphrase (8+ characters). ${passphraseHint}`
+    },
+    {
+      id: "unlock",
+      title: "Unlock the vault for this session",
+      done: unlocked && session,
+      tool: "vault_unlock",
+      user_action: initialized && !(unlocked && session) ? `Use the same passphrase. ${passphraseHint}` : void 0
+    },
+    {
+      id: "store",
+      title: "Store a credential",
+      done: false,
+      tool: "vault_set_secret",
+      user_action: unlocked ? "Provide name + value in the approval form (never paste the value into chat)." : "Complete unlock first."
+    },
+    {
+      id: "use",
+      title: "Use a credential via the agent",
+      done: false,
+      tool: "inject_secret",
+      user_action: "Agent reads a short-lived env file \u2014 the secret value stays out of chat."
+    }
+  ];
+}
+function vaultOnboardTool(store, dataDir2) {
+  const initialized = store.isInitialized();
+  const unlocked = store.isUnlocked;
+  const session = hasValidSession(sessionPath(dataDir2));
+  const steps = buildOnboardingSteps(initialized, unlocked, session);
+  const nextIncomplete = steps.find((s) => !s.done && s.id !== "check" && s.id !== "use" && s.id !== "store");
+  const ready = initialized && unlocked;
+  return jsonResult({
+    ok: true,
+    data_dir: dataDir2,
+    initialized,
+    unlocked,
+    session,
+    passphrase_env_configured: isPassphraseConfiguredInEnv(),
+    checklist: steps,
+    human_summary: !initialized ? "Your Password Space vault is not set up yet." : !unlocked ? "Vault exists but is locked." : "Vault is ready \u2014 you can store and inject secrets.",
+    next_tool: ready ? "vault_set_secret" : nextIncomplete?.tool ?? "vault_status",
+    next_steps: steps.filter((s) => !s.done).map((s) => s.user_action ? `${s.title}: ${s.user_action}` : s.title),
+    never_paste_in_chat: ["passphrase", "secret values"]
+  });
 }
 function vaultStatusTool(store, dataDir2) {
   const initialized = store.isInitialized();
   const unlocked = store.isUnlocked;
   const session = hasValidSession(sessionPath(dataDir2));
+  const steps = buildOnboardingSteps(initialized, unlocked, session);
+  const passphraseEnv = isPassphraseConfiguredInEnv();
+  const next = !initialized ? "Run vault_init with your passphrase in the MCP approval form (or PASSWORD_SPACE_PASSPHRASE). Do not approve empty {}." : !unlocked ? "Run vault_unlock with the same passphrase in the approval form (or PASSWORD_SPACE_PASSPHRASE)." : "Vault ready. Use vault_set_secret, then inject_secret when you need a credential.";
   return jsonResult({
     ok: true,
     data_dir: dataDir2,
@@ -22084,7 +22168,14 @@ function vaultStatusTool(store, dataDir2) {
     unlocked,
     session,
     secret_count: unlocked ? store.listSecrets().length : null,
-    next: !initialized ? "Call vault_init to create the vault (passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE)." : !unlocked ? "Call vault_unlock (passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE)." : "Vault ready. Use vault_set_secret / inject_secret as needed."
+    passphrase_env_configured: passphraseEnv,
+    next,
+    next_steps: steps.filter((s) => !s.done).map((s) => ({
+      step: s.title,
+      tool: s.tool,
+      action: s.user_action
+    })),
+    tip: !passphraseEnv && (!initialized || !unlocked) ? "Set PASSWORD_SPACE_PASSPHRASE in Cursor \u2192 Settings \u2192 MCP \u2192 password-space \u2192 Environment to skip typing the passphrase on each tool call." : void 0
   });
 }
 async function vaultInitTool(store, dataDir2, args) {
@@ -22229,10 +22320,14 @@ function publicMeta(m) {
 }
 function assertUnlocked(store) {
   if (!store.isInitialized()) {
-    throw new Error("Vault not initialized. Call vault_init (or CLI: password-space init)");
+    throw new Error(
+      "Password Space is not set up yet. Call vault_onboard or vault_init first (passphrase in the MCP form, not in chat)."
+    );
   }
   if (!store.isUnlocked) {
-    throw new Error("Vault is locked. Call vault_unlock (or CLI: password-space unlock)");
+    throw new Error(
+      "Password Space is locked. Call vault_unlock and enter your passphrase in the MCP approval form (not in chat)."
+    );
   }
 }
 
@@ -22246,14 +22341,36 @@ function withStore(fn) {
     store.close();
   }
 }
+var passphraseSchema = external_exports.string().min(8, "Passphrase must be at least 8 characters.").describe(
+  "Your vault passphrase (8+ characters). Enter here in the MCP approval form \u2014 do not paste into chat. Optional if PASSWORD_SPACE_PASSPHRASE is set in MCP Environment."
+);
+var optionalPassphraseShape = {
+  passphrase: passphraseSchema.optional()
+};
 var server = new McpServer({
   name: "password-space",
   version: "0.1.0"
 });
-server.tool(
+server.registerTool(
+  "vault_onboard",
+  {
+    title: "Password Space setup guide",
+    description: "Start here if setup feels stuck. Returns a plain-English checklist (no secrets). Safe when vault_init failed because the passphrase field was empty."
+  },
+  async () => {
+    try {
+      return withStore((store) => vaultOnboardTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
   "vault_status",
-  "Show whether the local vault is initialized and unlocked. Safe to call anytime; never returns secret values or the passphrase.",
-  {},
+  {
+    title: "Password Space status",
+    description: "See whether your vault is created and unlocked, plus what to do next. Safe anytime \u2014 never returns passwords or secret values."
+  },
   async () => {
     try {
       return withStore((store) => vaultStatusTool(store, dataDir));
@@ -22262,13 +22379,12 @@ server.tool(
     }
   }
 );
-server.tool(
+server.registerTool(
   "vault_init",
-  "Create a new encrypted vault. Pass passphrase as a tool argument (preferred: UI/agent secret prompt) or set PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat. Does not unlock \u2014 call vault_unlock next.",
   {
-    passphrase: external_exports.string().optional().describe(
-      "Vault passphrase (min 8 chars). Prefer a secret prompt / tool arg \u2014 do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE."
-    )
+    title: "Create Password Space vault",
+    description: "First-time setup: creates an encrypted vault on this computer. You must enter a passphrase (8+ chars) in the approval form \u2014 approving with empty {} will fail. Does not unlock; call vault_unlock next.",
+    inputSchema: optionalPassphraseShape
   },
   async ({ passphrase }) => {
     try {
@@ -22278,14 +22394,15 @@ server.tool(
     }
   }
 );
-server.tool(
+server.registerTool(
   "vault_unlock",
-  "Unlock the vault for this machine session (writes a short-lived session file). Pass passphrase via tool arg or PASSWORD_SPACE_PASSPHRASE. Never paste the passphrase into chat.",
   {
-    passphrase: external_exports.string().optional().describe(
-      "Unlock passphrase. Prefer a secret prompt / tool arg \u2014 do not echo in chat. Falls back to PASSWORD_SPACE_PASSPHRASE."
-    ),
-    ttl_hours: external_exports.number().optional().describe("Session TTL in hours (default: 8)")
+    title: "Unlock Password Space",
+    description: "Unlocks the vault for several hours so the agent can store and use credentials. Enter the same passphrase in the approval form (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment).",
+    inputSchema: {
+      ...optionalPassphraseShape,
+      ttl_hours: external_exports.number().min(0.1).max(168).optional().describe("How long to stay unlocked in hours (default 8, max 168).")
+    }
   },
   async ({ passphrase, ttl_hours }) => {
     try {
@@ -22297,7 +22414,7 @@ server.tool(
 );
 server.tool(
   "vault_lock",
-  "Clear the unlock session so the vault is locked again.",
+  "Lock Password Space \u2014 clears the unlock session on this machine.",
   {},
   async () => {
     try {
@@ -22307,16 +22424,19 @@ server.tool(
     }
   }
 );
-server.tool(
+server.registerTool(
   "vault_set_secret",
-  "Store or update a secret (name + value + optional tags). Pass the value as a tool argument \u2014 do NOT repeat the value in chat. Returns metadata only.",
   {
-    name: external_exports.string().describe("Secret name (e.g. GITHUB_TOKEN)"),
-    value: external_exports.string().describe(
-      "Secret value. Pass via tool arg / secret prompt only \u2014 never paste into chat or commit logs."
-    ),
-    tags: external_exports.array(external_exports.string()).optional().describe('Optional tags for filtering (e.g. ["api", "github"])'),
-    notes: external_exports.string().optional().describe("Optional non-secret notes")
+    title: "Save a password or API token",
+    description: "Stores a credential in your vault. Fill name and value in the MCP approval form \u2014 never paste the value into chat. Returns only metadata.",
+    inputSchema: {
+      name: external_exports.string().min(1).describe("Short label for this credential (e.g. GITHUB_TOKEN, OpenAI API key)."),
+      value: external_exports.string().min(1).describe(
+        "The secret itself (token, password, API key). Enter in the approval form only \u2014 never in chat."
+      ),
+      tags: external_exports.array(external_exports.string()).optional().describe('Optional labels for filtering (e.g. ["api", "github"]).'),
+      notes: external_exports.string().optional().describe("Optional reminder text (not secret).")
+    }
   },
   async ({ name, value, tags, notes }) => {
     try {
@@ -22330,7 +22450,7 @@ server.tool(
 );
 server.tool(
   "list_secrets",
-  "List secret names, ids, and tags. Never returns secret values. Use before inject_secret.",
+  "List saved credential names (no values). Use before inject_secret.",
   {
     tag: external_exports.string().optional().describe("Optional tag filter")
   },
@@ -22344,7 +22464,7 @@ server.tool(
 );
 server.tool(
   "get_secret_metadata",
-  "Get metadata for one secret by name or id. Never returns the secret value.",
+  "Get details for one saved credential by name. Never returns the secret value.",
   {
     name: external_exports.string().describe("Secret name or id")
   },
@@ -22358,7 +22478,7 @@ server.tool(
 );
 server.tool(
   "inject_secret",
-  "PREFERRED agent access: write secret to a short-lived local env file and return a handle + path. Do NOT read the file into chat. Set redact_in_transcript on any display.",
+  "PREFERRED: let the agent use a credential without putting it in chat \u2014 writes a short-lived local env file and returns a handle. Do NOT read the file into chat.",
   {
     name: external_exports.string().describe("Secret name or id"),
     env_var: external_exports.string().optional().describe("Environment variable name to write (default: derived from secret name)")
@@ -22373,7 +22493,7 @@ server.tool(
 );
 server.tool(
   "resolve_secret",
-  "LAST RESORT: return plaintext in the tool result with redact_in_transcript=true. Prefer inject_secret. Requires confirm_redaction=true.",
+  "LAST RESORT: returns plaintext in the tool result. Prefer inject_secret. Requires confirm_redaction=true.",
   {
     name: external_exports.string().describe("Secret name or id"),
     confirm_redaction: external_exports.boolean().optional().describe("Must be true to acknowledge client will redact transcripts")
@@ -22390,8 +22510,22 @@ server.tool(
 );
 function errorResult(err) {
   const message = err instanceof Error ? err.message : String(err);
+  const payload = { ok: false, error: message };
+  if (err instanceof PassphraseRequiredError) {
+    payload.code = err.code;
+    payload.what_happened = "Cursor approved the tool without a passphrase (empty approval is not enough).";
+    payload.what_to_do = [
+      "Open the tool again and type your passphrase in the passphrase field before approving.",
+      "Or add PASSWORD_SPACE_PASSPHRASE in Cursor \u2192 Settings \u2192 MCP \u2192 password-space \u2192 Environment.",
+      "Call vault_onboard for a full checklist \u2014 never paste the passphrase into chat."
+    ];
+  } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
+    payload.code = "passphrase_too_short";
+    payload.what_to_do = ["Use at least 8 characters for your vault passphrase."];
+  }
   return {
-    content: [{ type: "text", text: JSON.stringify({ ok: false, error: message }, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload,
     isError: true
   };
 }

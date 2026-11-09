@@ -8,7 +8,9 @@ import {
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
+  PassphraseRequiredError,
   resolvePassphrase,
+  vaultOnboardTool,
   resolveSecretTool,
   vaultInitTool,
   vaultLockTool,
@@ -100,13 +102,14 @@ describe("MCP tools contract", () => {
 
 describe("vault lifecycle MCP tools", () => {
   it("resolvePassphrase prefers tool arg then env", () => {
-    expect(() => resolvePassphrase()).toThrow(/Passphrase required/);
+    expect(() => resolvePassphrase()).toThrow(PassphraseRequiredError);
     process.env.PASSWORD_SPACE_PASSPHRASE = "env-passphrase-xx";
     expect(resolvePassphrase()).toBe("env-passphrase-xx");
     expect(resolvePassphrase("arg-passphrase-yy")).toBe("arg-passphrase-yy");
+    expect(() => resolvePassphrase("short")).toThrow(/8 character/i);
   });
 
-  it("vault_status reports uninitialized vault", () => {
+  it("vault_status reports uninitialized vault with next_steps", () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     const result = vaultStatusTool(store, dir);
@@ -114,10 +117,26 @@ describe("vault lifecycle MCP tools", () => {
       initialized: boolean;
       unlocked: boolean;
       next: string;
+      next_steps: Array<{ tool?: string }>;
     };
     expect(parsed.initialized).toBe(false);
     expect(parsed.unlocked).toBe(false);
     expect(parsed.next).toMatch(/vault_init/);
+    expect(parsed.next_steps.some((s) => s.tool === "vault_init")).toBe(true);
+    store.close();
+  });
+
+  it("vault_onboard returns checklist without secrets", () => {
+    const dir = tempDir();
+    const store = new VaultStore(join(dir, "vault.db"));
+    const result = vaultOnboardTool(store, dir);
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      checklist: Array<{ id: string; done: boolean }>;
+      human_summary: string;
+    };
+    expect(parsed.checklist.length).toBeGreaterThan(3);
+    expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
+    expect(parsed.human_summary).toMatch(/not set up/i);
     store.close();
   });
 
