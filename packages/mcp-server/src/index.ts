@@ -21,6 +21,9 @@ import {
 import { z } from "zod";
 import { defaultDataDir, openVault } from "@password-space/vault";
 import {
+  CLI_SETUP_COMMANDS,
+  HOST_LIMITATION,
+  MCP_ENV_PATH,
   NodeVersionError,
   PassphraseRequiredError,
   getSecretMetadataTool,
@@ -222,15 +225,24 @@ registerAppTool(
   {
     title: "Open Vault Manager",
     description:
-      "Interactive Password Space Vault Manager (list/add/edit/remove credentials, lock/unlock, change passphrase). Progressive enhancement: hosts without MCP Apps still get structured JSON.",
+      "Interactive Password Space Vault Manager (list/add/edit/remove credentials, lock/unlock, change passphrase). Requires Cursor MCP Apps (2.6+). If only JSON returns, fall back to Terminal `pnpm password-space setup` / unlock — do not vault_init with empty {}.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },
+      "mcp/app": { resourceUri: VAULT_MANAGER_UI },
     },
   },
   async () => {
     try {
-      return withStore((store) => vaultManagerTool(store, dataDir));
+      const result = withStore((store) => vaultManagerTool(store, dataDir));
+      // Ensure Apps hosts can bind the UI even when reading tool result only.
+      return {
+        ...result,
+        _meta: {
+          ...(result._meta ?? {}),
+          ui: { resourceUri: VAULT_MANAGER_UI },
+        },
+      };
     } catch (err) {
       return errorResult(err);
     }
@@ -242,18 +254,25 @@ registerAppResource(
   "Password Space Vault Manager",
   VAULT_MANAGER_UI,
   {
-    description: "Interactive vault manager UI",
+    description:
+      "Interactive vault manager UI (MCP Apps). If the host does not fetch this resource, show apps_fallback from vault_manager JSON.",
     mimeType: RESOURCE_MIME_TYPE,
   },
-  async () => ({
-    contents: [
-      {
-        uri: VAULT_MANAGER_UI,
-        mimeType: RESOURCE_MIME_TYPE,
-        text: loadVaultManagerHtml(),
-      },
-    ],
-  }),
+  async () => {
+    const html = loadVaultManagerHtml();
+    return {
+      contents: [
+        {
+          uri: VAULT_MANAGER_UI,
+          mimeType: RESOURCE_MIME_TYPE,
+          text: html,
+          _meta: {
+            ui: { resourceUri: VAULT_MANAGER_UI },
+          },
+        },
+      ],
+    };
+  },
 );
 
 server.registerTool(
@@ -378,14 +397,23 @@ function errorResult(err: unknown) {
     ];
   } else if (err instanceof PassphraseRequiredError) {
     payload.code = err.code;
+    payload.host_limitation = err.host_limitation;
+    payload.recommended_path = err.recommended_path;
+    payload.copy_paste_command = CLI_SETUP_COMMANDS.from_clone;
+    payload.copy_paste_commands = CLI_SETUP_COMMANDS;
     payload.howToFix =
-      "Open the approval form again, enter your vault passphrase, then approve. Do not approve with empty {}.";
-    payload.what_happened = "The passphrase field was empty.";
+      "Stop retrying vault_init/unlock with empty {}. Run Terminal CLI setup (copy_paste_command) or set PASSWORD_SPACE_PASSPHRASE in MCP Environment.";
+    payload.what_happened =
+      "Cursor approved the tool with empty {} — no passphrase was provided (common host limitation).";
     payload.what_to_do = [
-      "Type your passphrase in the approval form — don't approve with empty fields.",
-      "Optional: Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE.",
-      "Run /setup-password-space (vault_onboard) for the single guided path.",
-      "Advanced escape hatch only: `password-space setup` in Terminal.",
+      `Recommended: ${CLI_SETUP_COMMANDS.from_clone}`,
+      `Or: ${MCP_ENV_PATH}`,
+      "Or call vault_manager — if App UI renders, create/unlock there; if only JSON, use CLI.",
+      "Do not ask the user to reply \"ready\" then call vault_init again without a passphrase channel.",
+    ];
+    payload.never = [
+      "Approve vault_init / vault_unlock with empty {}",
+      'Tell the user to reply "ready" then call vault_init without passphrase',
     ];
   } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
     payload.code = "passphrase_too_short";
@@ -394,11 +422,17 @@ function errorResult(err: unknown) {
   } else if (/Wrong passphrase/i.test(message)) {
     payload.code = "wrong_passphrase";
     payload.howToFix =
-      "That passphrase did not unlock the vault. Retry vault_unlock carefully — there is no recovery without the correct passphrase.";
+      "That passphrase did not unlock the vault. Retry carefully via CLI unlock or MCP Environment — there is no recovery without the correct passphrase.";
   } else if (/locked/i.test(message)) {
-    payload.howToFix = "Run vault_unlock and enter your passphrase in the approval form.";
+    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.unlock_from_clone}\` or set PASSWORD_SPACE_PASSPHRASE then vault_unlock.`;
+    payload.host_limitation = HOST_LIMITATION;
+    payload.recommended_path = "cli_unlock";
+    payload.copy_paste_command = CLI_SETUP_COMMANDS.unlock_from_clone;
   } else if (/not set up|not initialized/i.test(message)) {
-    payload.howToFix = "Run /setup-password-space, then approve vault_init with your passphrase in the form.";
+    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.from_clone}\` or /setup-password-space and follow primary_action (CLI-first).`;
+    payload.host_limitation = HOST_LIMITATION;
+    payload.recommended_path = "cli_setup";
+    payload.copy_paste_command = CLI_SETUP_COMMANDS.from_clone;
   }
 
   return {

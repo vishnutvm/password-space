@@ -10,37 +10,37 @@ Password Space keeps your API keys and passwords **on your Mac**, **encrypted**,
 2. Import `https://github.com/vishnutvm/password-space` and install **password-space**.
 3. Ensure **Node.js 20+** (`node -v`), then reload Cursor.
 
-## Set up (one path)
+## Set up (default = Terminal CLI)
 
-| Step | You do | Agent calls |
+| Step | You do | Agent / tool |
 | --- | --- | --- |
 | **1. Welcome** | Run **`/setup-password-space`** | `vault_onboard` |
-| **2. Secure** | Enter passphrase in **approval form** (8+ chars) | `vault_init` |
-| **3. Unlock** | Same passphrase in approval form | `vault_unlock` |
-| **4. Save** | Name + token in approval form only | `vault_set_secret` |
+| **2. Secure** | Paste **`copy_paste_command`** in Terminal (hidden passphrase) | `cli_setup` / `pnpm password-space setup` |
+| **3. Confirm** | Back in chat | `vault_status` |
+| **4. Save** | Name + token in approval form or Vault Manager | `vault_set_secret` |
+
+### Why Terminal first?
+
+Many Cursor builds approve `vault_init` with empty `{}` and **no passphrase field**. That causes a `passphrase_missing` loop. CLI setup avoids it.
+
+### One-click alternative
+
+**Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`  
+Then `vault_init` / `vault_unlock` with `{}` is safe. Never put that value in chat.
 
 ### The one rule people miss
 
-When Cursor shows **Run tool**, fill in the **passphrase** field. Approving with empty fields will not work.
-
-### Optional convenience
-
-**Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`  
-Never put that value in chat.
-
-### Advanced only
-
-CLI `password-space setup` is a power-user escape hatch — not the default path. See [EXTERNAL_USER_INSTALL.md](./EXTERNAL_USER_INSTALL.md).
+Never approve `vault_init` / `vault_unlock` with empty fields unless `PASSWORD_SPACE_PASSPHRASE` is set. Never reply "ready" and expect the agent to invent a passphrase channel.
 
 ## Daily use
 
-- **Vault Manager (MCP Apps):** ask the agent to open **`vault_manager`** — interactive list/add/edit/remove, lock/unlock, change passphrase (Cursor 2.6+). Falls back to tools if Apps UI is unavailable.
+- **Vault Manager (MCP Apps):** ask the agent to open **`vault_manager`** — interactive list/add/edit/remove (Cursor 2.6+). If only JSON returns, use tools/CLI.
 - **Status:** `vault_status`
 - **Use a saved credential:** `inject_secret` (preferred — no value in chat)
 - **Done for the day:** `vault_lock`
 
 ## Need help?
 
-Say: *“Walk me through Password Space setup.”* The agent should call `vault_onboard` and explain the **single** `primary_action` in plain language — no `mcp.json`, no competing CLI vs chat options.
+Say: *“Walk me through Password Space setup.”* The agent should call `vault_onboard` and explain the **single** `primary_action` (usually a Terminal copy-paste) — no `mcp.json`.
 
 More: [zero-friction-v1.md](./zero-friction-v1.md) · [plugin README](../plugins/password-space/README.md) · [Security](../SECURITY.md)

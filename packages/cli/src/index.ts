@@ -232,14 +232,18 @@ async function main(): Promise<void> {
 
         if (!initialized) {
           console.log("Password Space — next step\n");
-          console.log("  Newcomers (recommended): In Cursor run /setup-password-space");
-          console.log("    → approve vault_init and type passphrase in the form (never empty {}).");
-          console.log("\n  Advanced escape hatch: password-space setup");
+          console.log("  Recommended (Cursor often has no passphrase field):");
+          console.log("    password-space setup");
+          console.log("    or: pnpm password-space setup   (from a clone)");
+          console.log("\n  One-click alternative:");
+          console.log("    Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE");
+          console.log("    then vault_init {} in Cursor");
+          console.log("\n  Avoid: approving vault_init with empty {} when no passphrase field is shown.");
           break;
         }
         if (!unlocked || !session) {
-          console.log("Next: vault_unlock in Cursor (passphrase in approval form)");
-          console.log("  Advanced: password-space unlock");
+          console.log("Next: password-space unlock");
+          console.log("  Or: set PASSWORD_SPACE_PASSPHRASE in MCP Environment, then vault_unlock {}");
           break;
         }
         console.log("Vault ready. Next: vault_set_secret in Cursor  (or password-space set <NAME>)");
