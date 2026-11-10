@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { VaultStore } from "./store.js";
 import { VaultError } from "./types.js";
 import { writeSession, readSession, clearSession } from "./session.js";
 import { redactSecrets, looksLikeSecretLeak } from "./redact.js";
-import { writeInjectFile } from "./inject.js";
+import { writeInjectFile, clearExpiredInjectFiles } from "./inject.js";
 
 const dirs: string[] = [];
 
@@ -142,5 +142,40 @@ describe("inject", () => {
     expect(JSON.stringify(handle)).not.toContain("plain-value-xyz");
     const body = readFileSync(handle.envFile, "utf8");
     expect(body).toContain("plain-value-xyz");
+  });
+
+  it("clearExpiredInjectFiles removes past-TTL inject files", () => {
+    const { dir } = tmpVault();
+    const inject = join(dir, "inject");
+    mkdirSync(inject, { recursive: true });
+    const expired = join(inject, "old.env");
+    const past = new Date(Date.now() - 60_000).toISOString();
+    writeFileSync(
+      expired,
+      `# password-space inject — expires ${past}\nSECRET='x'\n`,
+      { mode: 0o600 },
+    );
+    expect(clearExpiredInjectFiles(dir)).toBe(1);
+    expect(existsSync(expired)).toBe(false);
+  });
+});
+
+describe("changePassphrase", () => {
+  it("re-wraps vault key and keeps secrets readable", async () => {
+    const { store } = tmpVault();
+    await store.init("old-passphrase-xx");
+    await store.unlock("old-passphrase-xx");
+    store.setSecret({ name: "KEEP", value: "still-here" });
+    store.lock();
+    await store.changePassphrase("old-passphrase-xx", "new-passphrase-yy");
+    expect(store.isUnlocked).toBe(true);
+    expect(store.getSecret("KEEP").value).toBe("still-here");
+    store.lock();
+    await expect(store.unlock("old-passphrase-xx")).rejects.toMatchObject({
+      code: "WRONG_PASSPHRASE",
+    });
+    await store.unlock("new-passphrase-yy");
+    expect(store.getSecret("KEEP").value).toBe("still-here");
+    store.close();
   });
 });

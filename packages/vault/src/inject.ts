@@ -1,7 +1,17 @@
-import { chmodSync, mkdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  writeFileSync,
+  unlinkSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { injectDir } from "./paths.js";
+
+export const DEFAULT_INJECT_TTL_MS = 5 * 60 * 1000;
 
 export type InjectHandle = {
   /** Opaque handle agents may reference in chat */
@@ -33,12 +43,13 @@ export function writeInjectFile(
     ttlMs?: number;
   },
 ): InjectHandle {
+  clearExpiredInjectFiles(dataDir);
   const dir = injectDir(dataDir);
   mkdirSync(dir, { recursive: true });
   const token = randomBytes(16).toString("hex");
   const envVar = opts.envVar ?? sanitizeEnvName(opts.secretName);
   const envFile = join(dir, `${token}.env`);
-  const ttlMs = opts.ttlMs ?? 5 * 60 * 1000;
+  const ttlMs = opts.ttlMs ?? DEFAULT_INJECT_TTL_MS;
   const expiresAt = new Date(Date.now() + ttlMs).toISOString();
 
   const content = [
@@ -69,6 +80,32 @@ export function writeInjectFile(
 
 export function clearInjectFile(envFile: string): void {
   if (existsSync(envFile)) unlinkSync(envFile);
+}
+
+/**
+ * Delete inject `*.env` files whose `# password-space inject — expires …` header is past.
+ * Also removes files that cannot be parsed and are older than the default TTL by mtime.
+ */
+export function clearExpiredInjectFiles(dataDir: string, now = Date.now()): number {
+  const dir = injectDir(dataDir);
+  if (!existsSync(dir)) return 0;
+  let removed = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".env")) continue;
+    const full = join(dir, name);
+    try {
+      const body = readFileSync(full, "utf8");
+      const match = /^# password-space inject — expires (.+)$/m.exec(body);
+      const expiresMs = match ? Date.parse(match[1]!) : NaN;
+      if (Number.isFinite(expiresMs) && expiresMs <= now) {
+        unlinkSync(full);
+        removed++;
+      }
+    } catch {
+      // ignore unreadable files
+    }
+  }
+  return removed;
 }
 
 function sanitizeEnvName(name: string): string {

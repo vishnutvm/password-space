@@ -8,8 +8,16 @@
  *
  * Never log passphrases or secret values.
  */
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  registerAppResource,
+  registerAppTool,
+  RESOURCE_MIME_TYPE,
+} from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
 import { defaultDataDir, openVault } from "@password-space/vault";
 import {
@@ -19,13 +27,31 @@ import {
   injectSecretTool,
   listSecretsTool,
   resolveSecretTool,
+  vaultChangePassphraseTool,
+  vaultDeleteSecretTool,
   vaultInitTool,
   vaultLockTool,
+  vaultManagerTool,
   vaultOnboardTool,
   vaultSetSecretTool,
   vaultStatusTool,
   vaultUnlockTool,
 } from "./tools.js";
+
+const VAULT_MANAGER_UI = "ui://password-space/vault-manager.html";
+
+function loadVaultManagerHtml(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, "vault-manager.html"),
+    join(here, "../app/vault-manager.html"),
+    join(here, "../../plugins/password-space/dist/vault-manager.html"),
+  ];
+  for (const path of candidates) {
+    if (existsSync(path)) return readFileSync(path, "utf8");
+  }
+  return `<!DOCTYPE html><html><body><p>Password Space Vault Manager UI is not bundled. Use vault_status / list_secrets tools instead.</p></body></html>`;
+}
 
 // defaultDataDir ignores empty / unresolved `${PASSWORD_SPACE_HOME}` placeholders
 const dataDir = defaultDataDir();
@@ -140,6 +166,94 @@ server.tool(
       return errorResult(err);
     }
   },
+);
+
+server.registerTool(
+  "vault_change_passphrase",
+  {
+    title: "Change vault passphrase",
+    description:
+      "Re-wraps the vault key under a new passphrase. Enter current and new passphrase in the approval form or Vault Manager App — never in chat, never via elicitation.",
+    inputSchema: {
+      current_passphrase: passphraseSchema.optional().describe(
+        "Current vault passphrase. Optional if PASSWORD_SPACE_PASSPHRASE is set.",
+      ),
+      new_passphrase: z
+        .string()
+        .min(8)
+        .describe("New passphrase (8+ characters). Enter in the approval form only."),
+      ttl_hours: z.number().min(0.1).max(168).optional(),
+    },
+  },
+  async ({ current_passphrase, new_passphrase, ttl_hours }) => {
+    try {
+      return await vaultChangePassphraseTool(dataDir, {
+        current_passphrase,
+        new_passphrase,
+        ttl_hours,
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "vault_delete_secret",
+  {
+    title: "Remove a credential",
+    description: "Deletes a saved credential by name. Never returns the secret value.",
+    inputSchema: {
+      name: z.string().min(1).describe("Secret name or id to delete"),
+    },
+  },
+  async ({ name }) => {
+    try {
+      return withStore((store) => vaultDeleteSecretTool(store, name));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+registerAppTool(
+  server,
+  "vault_manager",
+  {
+    title: "Open Vault Manager",
+    description:
+      "Interactive Password Space Vault Manager (list/add/edit/remove credentials, lock/unlock, change passphrase). Progressive enhancement: hosts without MCP Apps still get structured JSON.",
+    inputSchema: {},
+    _meta: {
+      ui: { resourceUri: VAULT_MANAGER_UI },
+    },
+  },
+  async () => {
+    try {
+      return withStore((store) => vaultManagerTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+registerAppResource(
+  server,
+  "Password Space Vault Manager",
+  VAULT_MANAGER_UI,
+  {
+    description: "Interactive vault manager UI",
+    mimeType: RESOURCE_MIME_TYPE,
+  },
+  async () => ({
+    contents: [
+      {
+        uri: VAULT_MANAGER_UI,
+        mimeType: RESOURCE_MIME_TYPE,
+        text: loadVaultManagerHtml(),
+      },
+    ],
+  }),
 );
 
 server.registerTool(

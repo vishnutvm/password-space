@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import {
   VaultStore,
+  changeVaultPassphrase,
+  clearExpiredInjectFiles,
   hasValidSession,
   lockVaultSession,
   sessionPath,
@@ -564,6 +566,76 @@ export function vaultLockTool(dataDir: string): ToolJsonResult {
     locked: true,
     data_dir: dataDir,
     note: "Unlock session cleared.",
+  });
+}
+
+export async function vaultChangePassphraseTool(
+  dataDir: string,
+  args: { current_passphrase?: string; new_passphrase?: string; ttl_hours?: number },
+): Promise<ToolJsonResult> {
+  assertNodeVersion();
+  const current = resolvePassphrase(args.current_passphrase);
+  const next = args.new_passphrase?.trim();
+  if (!next || next.length < 8) {
+    throw new Error("new_passphrase must be at least 8 characters.");
+  }
+  const ttlHours = args.ttl_hours ?? 8;
+  const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1000;
+  const { expiresAt } = await changeVaultPassphrase(current, next, { dataDir, ttlMs });
+  return jsonResult({
+    ok: true,
+    changed: true,
+    unlocked: true,
+    data_dir: dataDir,
+    expires_at: expiresAt,
+    note: "Passphrase updated. Session refreshed. Passphrases were not returned.",
+  });
+}
+
+export function vaultDeleteSecretTool(store: VaultStore, name: string): ToolJsonResult {
+  assertUnlocked(store);
+  store.deleteSecret(name);
+  return jsonResult({
+    ok: true,
+    deleted: name,
+    note: "Secret removed. Value was not returned.",
+  });
+}
+
+/**
+ * Vault Manager entry tool — progressive enhancement.
+ * Hosts with MCP Apps render `ui://password-space/vault-manager.html`.
+ * Others still get structured JSON (status + how to use tools).
+ */
+export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonResult {
+  clearExpiredInjectFiles(dataDir);
+  const status = vaultStatusTool(store, dataDir);
+  const parsed = JSON.parse(status.content[0]!.text) as Record<string, unknown>;
+  const secrets =
+    store.isUnlocked && store.isInitialized()
+      ? store.listSecrets().map(publicMeta)
+      : [];
+  return jsonResult({
+    ok: true,
+    app: "vault-manager",
+    ui_resource: "ui://password-space/vault-manager.html",
+    progressive_enhancement:
+      "If your client supports MCP Apps, an interactive Vault Manager UI is shown. Otherwise use the tools listed in capabilities.",
+    status: parsed,
+    secrets,
+    capabilities: {
+      list: "list_secrets",
+      add_or_edit: "vault_set_secret",
+      remove: "vault_delete_secret",
+      lock: "vault_lock",
+      unlock: "vault_unlock",
+      change_passphrase: "vault_change_passphrase",
+      inject: "inject_secret",
+    },
+    passphrase_note:
+      "Passphrase is entered in the App form or MCP approval args / Environment — never via elicitation, never in chat.",
+    elicitation_note:
+      "Passphrase is collected only via tool approval args, PASSWORD_SPACE_PASSPHRASE env, CLI, or the Vault Manager App form — never via MCP elicitation.",
   });
 }
 

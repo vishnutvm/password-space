@@ -15,8 +15,11 @@ import {
   buildPrimaryAction,
   vaultOnboardTool,
   resolveSecretTool,
+  vaultChangePassphraseTool,
+  vaultDeleteSecretTool,
   vaultInitTool,
   vaultLockTool,
+  vaultManagerTool,
   vaultSetSecretTool,
   vaultStatusTool,
   vaultUnlockTool,
@@ -279,6 +282,57 @@ describe("vault lifecycle MCP tools", () => {
     const locked = openVault({ dataDir: dir, useSession: true });
     expect(locked.isUnlocked).toBe(false);
     locked.close();
+  });
+
+  it("vault_manager returns secrets metadata without plaintext", async () => {
+    const { dir, store, value } = await unlockedStore();
+    const result = vaultManagerTool(store, dir);
+    assertNoPlaintext(result, value);
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      app: string;
+      ui_resource: string;
+      secrets: Array<{ name: string; value?: string }>;
+      capabilities: Record<string, string>;
+    };
+    expect(parsed.app).toBe("vault-manager");
+    expect(parsed.ui_resource).toMatch(/^ui:\/\//);
+    expect(parsed.secrets[0]?.name).toBe("DEMO_KEY");
+    expect(parsed.secrets[0]?.value).toBeUndefined();
+    expect(parsed.capabilities.remove).toBe("vault_delete_secret");
+    store.close();
+  });
+
+  it("vault_delete_secret removes without leaking", async () => {
+    const { store, value } = await unlockedStore();
+    const result = vaultDeleteSecretTool(store, "DEMO_KEY");
+    assertNoPlaintext(result, value);
+    expect(store.listSecrets()).toHaveLength(0);
+    store.close();
+  });
+
+  it("vault_change_passphrase keeps secrets and refreshes session", async () => {
+    const dir = tempDir();
+    const store = new VaultStore(join(dir, "vault.db"));
+    await store.init("change-pass-old-1");
+    store.close();
+    await vaultUnlockTool(dir, { passphrase: "change-pass-old-1", ttl_hours: 1 });
+    const unlocked = openVault({ dataDir: dir, useSession: true });
+    unlocked.setSecret({ name: "X", value: "token-keep-me" });
+    unlocked.close();
+
+    const result = await vaultChangePassphraseTool(dir, {
+      current_passphrase: "change-pass-old-1",
+      new_passphrase: "change-pass-new-2",
+      ttl_hours: 1,
+    });
+    assertNoPlaintext(result, "change-pass-old-1");
+    assertNoPlaintext(result, "change-pass-new-2");
+    assertNoPlaintext(result, "token-keep-me");
+
+    const again = openVault({ dataDir: dir, useSession: true });
+    expect(again.isUnlocked).toBe(true);
+    expect(again.getSecret("X").value).toBe("token-keep-me");
+    again.close();
   });
 
   it("vault_init accepts passphrase from env", async () => {

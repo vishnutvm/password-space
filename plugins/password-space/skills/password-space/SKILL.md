@@ -16,7 +16,9 @@ Encrypted vault on the user's Mac. **One obvious next step** — no competing pa
 
 ## After vault exists
 
+- **`vault_manager`** — interactive Vault Manager (MCP Apps); progressive JSON fallback
 - **`vault_set_secret`** — approval form only
+- **`vault_delete_secret`** / **`vault_change_passphrase`** when needed
 - **`inject_secret`** — preferred for agents
 - **`vault_lock`** when done
 
