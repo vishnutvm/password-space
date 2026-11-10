@@ -58,11 +58,7 @@ function setStatus(msg: string, kind: "ok" | "err" | "info" = "info"): void {
 function renderShell(): void {
   root().innerHTML = `
     <div class="shell">
-      <header class="hero">
-        <p class="brand">Password Space</p>
-        <h1>Vault Manager</h1>
-        <p class="lede" id="lede">Loading vault status…</p>
-      </header>
+      <h1 id="page-title">Vault</h1>
       <section class="panel" id="auth-panel"></section>
       <section class="panel" id="secrets-panel" hidden></section>
       <section class="panel" id="passphrase-panel" hidden></section>
@@ -86,23 +82,19 @@ async function main(): Promise<void> {
 
   const paint = (payload: ManagerPayload) => {
     const st = payload.status ?? {};
-    $("lede").textContent = st.unlocked
-      ? "Unlocked — manage credentials on this device. Values stay out of chat."
-      : st.initialized
-        ? "Vault exists. Unlock to manage credentials."
-        : "Create your encrypted vault to get started.";
-
+    const title = $("page-title");
     const auth = $("auth-panel");
     const secrets = $("secrets-panel");
     const passPanel = $("passphrase-panel");
 
     if (!st.initialized) {
+      title.textContent = "Create vault";
       auth.innerHTML = `
-        <h2>Create vault</h2>
-        <p class="hint">Choose a passphrase (8+ characters). Entered here only — never in chat.</p>
         <label>Passphrase<input type="password" id="init-pass" autocomplete="new-password" minlength="8" /></label>
         <label>Confirm<input type="password" id="init-pass2" autocomplete="new-password" minlength="8" /></label>
-        <button type="button" class="primary" id="btn-init">Create vault</button>
+        <div class="actions">
+          <button type="button" class="primary" id="btn-init">Create vault</button>
+        </div>
       `;
       secrets.hidden = true;
       passPanel.hidden = true;
@@ -114,7 +106,7 @@ async function main(): Promise<void> {
         try {
           await call("vault_init", { passphrase: p1 });
           await call("vault_unlock", { passphrase: p1 });
-          setStatus("Vault created and unlocked.", "ok");
+          setStatus("Vault created.", "ok");
           await refresh();
         } catch (e) {
           setStatus(e instanceof Error ? e.message : String(e), "err");
@@ -124,11 +116,10 @@ async function main(): Promise<void> {
     }
 
     if (!st.unlocked) {
+      title.textContent = "Unlock";
       auth.innerHTML = `
-        <h2>Unlock</h2>
-        <p class="hint">Same passphrase as setup. Not sent via elicitation.</p>
         <label>Passphrase<input type="password" id="unlock-pass" autocomplete="current-password" minlength="8" /></label>
-        <div class="row">
+        <div class="actions">
           <button type="button" class="primary" id="btn-unlock">Unlock</button>
         </div>
       `;
@@ -147,12 +138,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    title.textContent = "Credentials";
     auth.innerHTML = `
-      <div class="row between">
-        <h2>Session</h2>
-        <button type="button" class="ghost" id="btn-lock">Lock vault</button>
+      <div class="row">
+        <span class="hint" style="margin:0">Unlocked</span>
+        <button type="button" class="ghost" id="btn-lock">Lock</button>
       </div>
-      <p class="hint">Lock when idle. Unlocked session is local-only trust.</p>
     `;
     $("btn-lock").onclick = async () => {
       try {
@@ -167,7 +158,6 @@ async function main(): Promise<void> {
     secrets.hidden = false;
     const list = payload.secrets ?? [];
     secrets.innerHTML = `
-      <h2>Credentials</h2>
       <ul class="list" id="secret-list">
         ${
           list.length === 0
@@ -176,21 +166,19 @@ async function main(): Promise<void> {
                 .map(
                   (s) => `
             <li>
-              <div>
-                <strong>${escapeHtml(s.name)}</strong>
-                ${s.tags?.length ? `<span class="tags">${s.tags.map(escapeHtml).join(", ")}</span>` : ""}
-              </div>
+              <strong>${escapeHtml(s.name)}</strong>
               <button type="button" class="danger" data-del="${escapeHtml(s.name)}">Remove</button>
             </li>`,
                 )
                 .join("")
         }
       </ul>
-      <h3>Add or update</h3>
+      <h2>Add</h2>
       <label>Name<input type="text" id="sec-name" autocomplete="off" /></label>
       <label>Value<input type="password" id="sec-value" autocomplete="new-password" /></label>
-      <label>Tags <span class="muted">(comma-separated)</span><input type="text" id="sec-tags" autocomplete="off" /></label>
-      <button type="button" class="primary" id="btn-save">Save credential</button>
+      <div class="actions">
+        <button type="button" class="primary" id="btn-save">Save</button>
+      </div>
     `;
 
     secrets.querySelectorAll("[data-del]").forEach((btn) => {
@@ -210,14 +198,9 @@ async function main(): Promise<void> {
     $("btn-save").onclick = async () => {
       const name = (document.getElementById("sec-name") as HTMLInputElement).value.trim();
       const value = (document.getElementById("sec-value") as HTMLInputElement).value;
-      const tagsRaw = (document.getElementById("sec-tags") as HTMLInputElement).value;
-      const tags = tagsRaw
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
       if (!name || !value) return setStatus("Name and value are required.", "err");
       try {
-        await call("vault_set_secret", { name, value, tags });
+        await call("vault_set_secret", { name, value, tags: [] });
         (document.getElementById("sec-value") as HTMLInputElement).value = "";
         setStatus(`Saved ${name}.`, "ok");
         await refresh();
@@ -229,11 +212,12 @@ async function main(): Promise<void> {
     passPanel.hidden = false;
     passPanel.innerHTML = `
       <h2>Change passphrase</h2>
-      <p class="hint">Re-wraps the vault key. Entered only in this form.</p>
       <label>Current<input type="password" id="cur-pass" autocomplete="current-password" /></label>
       <label>New<input type="password" id="new-pass" autocomplete="new-password" minlength="8" /></label>
-      <label>Confirm new<input type="password" id="new-pass2" autocomplete="new-password" minlength="8" /></label>
-      <button type="button" class="primary" id="btn-changepw">Update passphrase</button>
+      <label>Confirm<input type="password" id="new-pass2" autocomplete="new-password" minlength="8" /></label>
+      <div class="actions">
+        <button type="button" class="primary" id="btn-changepw">Update</button>
+      </div>
     `;
     $("btn-changepw").onclick = async () => {
       const cur = (document.getElementById("cur-pass") as HTMLInputElement).value;
