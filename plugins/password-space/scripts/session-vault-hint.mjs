@@ -29,7 +29,7 @@ function main() {
     JSON.stringify({
       continue: true,
       additional_context:
-        "Password Space is installed but not set up yet — offer a short guided setup with vault_onboard or /setup-password-space (passphrases only in tool approval forms, never in chat).",
+        "Password Space: vault not set up — call vault_onboard and follow primary_action (prefer Terminal: password-space setup; never approve vault_init with empty {}).",
     }),
   );
 }

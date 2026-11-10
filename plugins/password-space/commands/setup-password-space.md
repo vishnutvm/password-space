@@ -1,30 +1,34 @@
 ---
-description: Guided Password Space setup — local, encrypted, credentials never pasted in chat
+description: Set up Password Space — one clear next step, no passphrase in chat
 ---
 
-Help the user complete **Password Space** setup with a calm, product-quality tone. **Never** ask for a passphrase or token in chat.
+Setup for a **non-technical** user. **Never** ask for passphrase or tokens in chat.
 
-## Open
+## Start
 
 1. Call **`vault_onboard`**.
-2. Share **`human_summary`**, **`progress.step_of`**, and **`trust_line`** in one short paragraph.
+2. Read **`primary_action`** aloud in plain language — that is the **only** next step.
+3. Do **not** offer multiple parallel paths unless `primary_action.or_alternative` exists.
 
-## Walk the four steps
+## If vault does not exist yet (`primary_action.id` = `cli_setup`)
 
-| Phase | Tool | Tell the user |
-| --- | --- | --- |
-| 1/4 Welcome | — | "We'll set up a private vault on your Mac in a few approvals." |
-| 2/4 Secure | `vault_init` | "Cursor will ask to run a tool — enter your passphrase there (8+ characters)." |
-| 3/4 Unlock | `vault_unlock` | "Same passphrase in the next approval form." |
-| 4/4 Save | `vault_set_secret` | "Add a label and your token in the form only — not here in chat." |
+**Primary (do this first):** Tell the user to open Terminal and run **`password-space setup`** (from repo: `pnpm password-space setup`).
 
-After each tool, confirm with **`vault_status`** (counts only — no secret values).
+- One hidden passphrase prompt — no MCP `{}` confusion.
+- When they return to chat, call **`vault_status`** to confirm.
 
-## If something failed
+**Only if Terminal is impossible:** Call **`vault_init`** and insist they enter passphrase in the **approval form** — **never** approve empty `{}`.
 
-- Empty approval → explain gently: fill the passphrase field, run **`vault_onboard`** again.
-- Use error **`howToFix`** when present; do not dump raw JSON.
+## If vault exists but locked
 
-## Close
+Follow **`primary_action`** (`password-space unlock` or **`vault_unlock`** with form).
 
-Confirm initialized + unlocked. Mention **`inject_secret`** for day-to-day use and **`vault_lock`** when finished.
+## If vault ready
+
+**`vault_set_secret`** — name and value in approval form only.
+
+## Rules
+
+- One primary action per turn until `vault_status` shows unlocked.
+- Summarize errors using **`howToFix`** — never dump JSON.
+- Confirm success without secret values.

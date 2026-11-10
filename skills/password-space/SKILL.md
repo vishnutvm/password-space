@@ -1,47 +1,33 @@
 ---
 name: password-space
-description: Password Space — local encrypted vault for Cursor. Guide setup with vault_onboard; use inject_secret for credentials; never paste secrets in chat.
+description: Install · Create vault · Use secrets — no secrets in chat. Follow vault_onboard primary_action; prefer password-space setup in Terminal when vault is missing.
 ---
 
 # Password Space
 
-Password Space is a **private vault on the user's device**. Setup takes a few tool approvals — passphrases and tokens stay **out of chat**.
+Encrypted vault on the user's Mac. **One obvious next step** — no debug dumps.
 
-## Welcome flow (preferred)
+## When vault is missing
 
-1. Call **`vault_onboard`** and explain `human_summary` + `progress.step_of` + `trust_line`.
-2. Guide **2/4** `vault_init` → **3/4** `vault_unlock` → **4/4** `vault_set_secret` (approval forms only).
-3. For using secrets: **`inject_secret`** (not `resolve_secret`).
+1. Call **`vault_onboard`**.
+2. Follow **`primary_action.do_this` exactly** (usually **`password-space setup`** in Terminal).
+3. Only use **`primary_action.or_alternative`** if they cannot use Terminal.
+4. **Never** approve **`vault_init`** / **`vault_unlock`** with empty `{}`.
 
-Or use **`/setup-password-space`**.
+## After vault exists
 
-> **Say to humans:** "When Cursor asks to approve the tool, type your passphrase in the form — empty approvals won't work."
+- **`vault_set_secret`** — approval form only
+- **`inject_secret`** — preferred for agents
+- **`vault_lock`** when done
 
-## Security rules (non-negotiable)
+## Never
 
-- Never put passphrases or secret values in chat, commits, or PRs.
-- Never approve `vault_init` / `vault_unlock` without a passphrase in the form (unless `PASSWORD_SPACE_PASSPHRASE` is set in MCP Environment).
-- Summarize tool errors with **`howToFix`** / **`what_to_do`** — friendly tone, no JSON walls.
+- Passphrase or secret values in chat
+- Multiple competing setup paths in one message
+- Plugin Configure `variables` (not supported — use MCP Environment)
 
-## Tools
+Optional env: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`.
 
-| Tool | Use |
-| --- | --- |
-| `vault_onboard` | **Start here** — phased checklist, no secrets |
-| `vault_status` | Status + `progress` + next step |
-| `vault_init` / `vault_unlock` | Setup (passphrase in approval form) |
-| `vault_set_secret` | Save credential (metadata only in response) |
-| `inject_secret` | **Preferred** agent access |
+Command: **`/setup-password-space`**.
 
-Optional: `PASSWORD_SPACE_PASSPHRASE` in **Settings → MCP → password-space → Environment**.
-
-## Safe phrasing
-
-> I'll open your Password Space checklist. Next you'll see an approval window — enter your vault passphrase there. It won't appear in our chat.
-
-## Forbidden
-
-> Here's your token: …  
-> Your passphrase is …
-
-CLI (`password-space onboard`) is for power users; marketplace users use **`vault_onboard`**.
+Safe line: *"Next step: run `password-space setup` in Terminal — one hidden passphrase. I won't ask for it here."*

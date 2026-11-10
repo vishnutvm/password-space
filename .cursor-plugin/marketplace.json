@@ -5,14 +5,14 @@
     "email": "vishnutvm@users.noreply.github.com"
   },
   "metadata": {
-    "description": "Password Space — local credential vault for Cursor agents (MCP + Skill + redaction hooks).",
+    "description": "Install · Create vault · Use secrets — no secrets in chat.",
     "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "password-space",
       "source": "./plugins/password-space",
-      "description": "Local encrypted vault for AI agents — inject secrets via MCP, never paste them in chat",
+      "description": "Install · Create vault · Use secrets — no secrets in chat.",
       "logo": "plugins/password-space/assets/logo.svg"
     }
   ]

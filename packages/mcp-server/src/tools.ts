@@ -103,6 +103,73 @@ export type OnboardingStep = {
   user_action?: string;
 };
 
+export type PrimaryAction = {
+  id: "cli_setup" | "vault_unlock" | "vault_set_secret" | "vault_init_env" | "vault_unlock_env";
+  title: string;
+  do_this: string;
+  cli_command?: string;
+  mcp_tool?: string;
+  never: string;
+  or_alternative?: string;
+};
+
+export function buildPrimaryAction(
+  initialized: boolean,
+  unlocked: boolean,
+  session: boolean,
+): PrimaryAction {
+  const env = isPassphraseConfiguredInEnv();
+  if (!initialized) {
+    if (env) {
+      return {
+        id: "vault_init_env",
+        title: "Create your vault",
+        do_this: "Call vault_init once (passphrase is already in MCP Environment).",
+        mcp_tool: "vault_init",
+        never: "Never paste the passphrase into chat.",
+      };
+    }
+    return {
+      id: "cli_setup",
+      title: "Create your vault",
+      do_this:
+        "Run in Terminal: password-space setup — one hidden passphrase prompt, then you're done for this step.",
+      cli_command: "password-space setup",
+      mcp_tool: "vault_init",
+      never: "Never approve vault_init with an empty approval form {}.",
+      or_alternative:
+        "No Terminal? Call vault_init and type your passphrase in the MCP approval form only.",
+    };
+  }
+  if (!unlocked || !session) {
+    if (env) {
+      return {
+        id: "vault_unlock_env",
+        title: "Unlock your vault",
+        do_this: "Call vault_unlock (passphrase from MCP Environment).",
+        mcp_tool: "vault_unlock",
+        never: "Never paste the passphrase into chat.",
+      };
+    }
+    return {
+      id: "vault_unlock",
+      title: "Unlock your vault",
+      do_this:
+        "Run in Terminal: password-space setup (or unlock), OR call vault_unlock with passphrase in the approval form.",
+      cli_command: "password-space unlock",
+      mcp_tool: "vault_unlock",
+      never: "Never approve vault_unlock with an empty passphrase field.",
+    };
+  }
+  return {
+    id: "vault_set_secret",
+    title: "Save a credential",
+    do_this: "Call vault_set_secret — enter name and value in the MCP approval form only.",
+    mcp_tool: "vault_set_secret",
+    never: "Never paste API keys or passwords into chat.",
+  };
+}
+
 export function buildOnboardingSteps(
   initialized: boolean,
   unlocked: boolean,
@@ -169,7 +236,7 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
   const unlocked = store.isUnlocked;
   const session = hasValidSession(sessionPath(dataDir));
   const steps = buildOnboardingSteps(initialized, unlocked, session);
-  const nextIncomplete = steps.find((s) => !s.done && s.id !== "check" && s.id !== "use" && s.id !== "store");
+  const primary_action = buildPrimaryAction(initialized, unlocked, session);
   const ready = initialized && unlocked;
 
   const progress = onboardingProgress(initialized, unlocked);
@@ -190,7 +257,8 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     progress,
     checklist: steps,
     human_summary,
-    next_tool: ready ? "vault_set_secret" : (nextIncomplete?.tool ?? "vault_status"),
+    primary_action,
+    next_tool: primary_action.mcp_tool ?? (ready ? "vault_set_secret" : "vault_status"),
     what_to_do: steps
       .filter((s) => !s.done && s.user_action)
       .slice(0, 2)
