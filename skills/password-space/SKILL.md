@@ -30,7 +30,9 @@ Encrypted vault on the user's Mac. **One obvious next step** — follow `primary
 
 ### Vault Manager App
 
-Call **`vault_manager`** only as an alternative. If an App UI appears, use it. If only JSON returns (`apps_fallback`), the host lacks MCP Apps — use CLI setup.
+Call **`vault_manager`** only as an alternative. If an App UI iframe appears, use it. If only JSON returns (`apps_fallback`), the host lacks MCP Apps — use CLI / `list_secrets` / `vault_set_secret`.
+
+**Never** fetch or paste `ui://password-space/vault-manager.html` (or any App HTML/JS / zod dump) into the conversation. The tool already returns structured JSON + Apps metadata; the host renders the resource — agents must not dump the resource body.
 
 ## After vault exists
 
@@ -46,5 +48,6 @@ Call **`vault_manager`** only as an alternative. If an App UI appears, use it. I
 - Ask the user to edit **`mcp.json`** or explain MCP
 - Call **`vault_init`** again when `setup_state` is `needs_unlock` / vault already exists
 - Lead with MCP approval-form `vault_init` when `primary_action.id` is `cli_setup`
+- Dump Vault Manager App HTML/JS / MCP resource bodies into chat
 
 Safe line: *"Next step: open Terminal and paste this command to create your vault. I won't ask for your passphrase in chat."*
