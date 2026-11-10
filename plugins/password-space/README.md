@@ -14,9 +14,10 @@
 
 ## After install
 
-1. In chat: **`/setup-password-space`** (one path — Install → Setup → Use).
-2. When Cursor shows **Run tool**, enter your **passphrase** in the form (8+ characters). Never approve empty `{}`.
-3. Optional: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never in chat).
+1. In chat: **`/setup-password-space`** — follow `primary_action` (usually **Terminal CLI setup**).
+2. Paste the shown `copy_paste_command` (e.g. `pnpm password-space setup`) and enter a passphrase at the hidden prompt.
+3. **One-click alternative:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never in chat), then `vault_init` with `{}`.
+4. Never approve empty `{}` when Cursor shows no passphrase field — that causes `passphrase_missing`.
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
