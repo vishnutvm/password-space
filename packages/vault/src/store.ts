@@ -193,6 +193,75 @@ export class VaultStore {
     }
   }
 
+  /**
+   * Re-wrap the vault key under a new passphrase-derived master key.
+   * Requires the vault to already be unlocked (or pass currentPassphrase to unlock).
+   */
+  async changePassphrase(currentPassphrase: string, nextPassphrase: string): Promise<Buffer> {
+    if (!this.isInitialized()) {
+      throw new VaultError("Vault not initialized", "NOT_INITIALIZED");
+    }
+    if (!nextPassphrase || nextPassphrase.length < 8) {
+      throw new VaultError("Passphrase must be at least 8 characters", "INVALID");
+    }
+    if (currentPassphrase === nextPassphrase) {
+      throw new VaultError("New passphrase must differ from the current one", "INVALID");
+    }
+
+    // Verify current passphrase and obtain vault key (even if already unlocked).
+    const meta = this.getMeta();
+    if (!meta) throw new VaultError("Vault metadata corrupt", "INVALID");
+    const salt = Buffer.from(meta.kdf.salt, "base64");
+    const wrappedB64 = (
+      this.db.prepare("SELECT value FROM meta WHERE key = 'wrapped_vault_key'").get() as MetaRow
+    ).value;
+    const wrapped = unpackBlob(Buffer.from(wrappedB64, "base64"));
+    const currentMaster = await deriveKey(currentPassphrase, salt, {
+      N: meta.kdf.N,
+      r: meta.kdf.r,
+      p: meta.kdf.p,
+    });
+
+    let vaultKey: Buffer;
+    try {
+      vaultKey = decrypt(wrapped, currentMaster);
+    } catch {
+      throw new VaultError("Wrong passphrase", "WRONG_PASSPHRASE");
+    } finally {
+      currentMaster.fill(0);
+    }
+
+    const newSalt = randomSalt();
+    const newMaster = await deriveKey(nextPassphrase, newSalt);
+    const newWrapped = encrypt(vaultKey, newMaster);
+    newMaster.fill(0);
+
+    const upsert = this.db.prepare(
+      `INSERT INTO meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    );
+    this.db.exec("BEGIN");
+    try {
+      upsert.run("kdf_salt", newSalt.toString("base64"));
+      upsert.run("kdf_N", String(SCRYPT_N));
+      upsert.run("kdf_r", String(SCRYPT_R));
+      upsert.run("kdf_p", String(SCRYPT_P));
+      upsert.run("wrapped_vault_key", packBlob(newWrapped).toString("base64"));
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      vaultKey.fill(0);
+      throw err;
+    }
+
+    if (this.vaultKey) {
+      this.vaultKey.fill(0);
+    }
+    this.vaultKey = vaultKey;
+    this.audit("change_passphrase", null, null, "human", null);
+    return Buffer.from(vaultKey);
+  }
+
   private requireKey(): Buffer {
     if (!this.vaultKey) {
       throw new VaultError("Vault is locked. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");

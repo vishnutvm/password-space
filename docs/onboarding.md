@@ -34,6 +34,7 @@ CLI `password-space setup` is a power-user escape hatch — not the default path
 
 ## Daily use
 
+- **Vault Manager (MCP Apps):** ask the agent to open **`vault_manager`** — interactive list/add/edit/remove, lock/unlock, change passphrase (Cursor 2.6+). Falls back to tools if Apps UI is unavailable.
 - **Status:** `vault_status`
 - **Use a saved credential:** `inject_secret` (preferred — no value in chat)
 - **Done for the day:** `vault_lock`
