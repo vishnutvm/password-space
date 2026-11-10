@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { VaultStore, openVault } from "@password-space/vault";
 import {
   assertNoPlaintext,
+  checkPrerequisites,
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
+  MIN_NODE_MAJOR,
   PassphraseRequiredError,
   resolvePassphrase,
   buildPrimaryAction,
@@ -110,7 +112,7 @@ describe("vault lifecycle MCP tools", () => {
     expect(() => resolvePassphrase("short")).toThrow(/8 character/i);
   });
 
-  it("vault_status reports uninitialized vault with next_steps", () => {
+  it("vault_status reports uninitialized vault with next_steps and prerequisites", () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     const result = vaultStatusTool(store, dir);
@@ -118,44 +120,101 @@ describe("vault lifecycle MCP tools", () => {
       initialized: boolean;
       unlocked: boolean;
       next: string;
+      setup_state: string;
+      prerequisites: { node_ok: boolean; required_node: string };
+      primary_action: { id: string };
       next_steps: Array<{ tool?: string }>;
     };
     expect(parsed.initialized).toBe(false);
     expect(parsed.unlocked).toBe(false);
-    expect(parsed.next).toMatch(/vault_init/);
+    expect(parsed.setup_state).toBe("needs_init");
+    expect(parsed.prerequisites.node_ok).toBe(true);
+    expect(parsed.prerequisites.required_node).toBe(`>=${MIN_NODE_MAJOR}`);
+    expect(parsed.primary_action.id).toBe("vault_init");
+    expect(parsed.next).toMatch(/vault_init|approval form/i);
     expect(parsed.next_steps.some((s) => s.tool === "vault_init")).toBe(true);
     store.close();
   });
 
-  it("buildPrimaryAction prefers cli_setup when vault missing", () => {
+  it("buildPrimaryAction prefers vault_init MCP form when vault missing", () => {
     const action = buildPrimaryAction(false, false, false);
-    expect(action.id).toBe("cli_setup");
-    expect(action.cli_command).toBe("password-space setup");
+    expect(action.id).toBe("vault_init");
+    expect(action.mcp_tool).toBe("vault_init");
     expect(action.never).toMatch(/empty/i);
+    expect(action.advanced_escape_hatch?.cli_command).toBe("password-space setup");
+    expect(action).not.toHaveProperty("or_alternative");
   });
 
-  it("vault_onboard returns checklist without secrets", () => {
+  it("buildPrimaryAction returns fix_node when prereq fails", () => {
+    const action = buildPrimaryAction(false, false, false, false);
+    expect(action.id).toBe("fix_node");
+    expect(action.do_this).toMatch(/Node\.js/i);
+  });
+
+  it("checkPrerequisites rejects Node below minimum", () => {
+    const bad = checkPrerequisites("v18.20.0");
+    expect(bad.ok).toBe(false);
+    expect(bad.node_ok).toBe(false);
+    expect(bad.howToFix).toMatch(/Node\.js/i);
+    const good = checkPrerequisites("v20.11.0");
+    expect(good.ok).toBe(true);
+  });
+
+  it("vault_onboard returns single primary_action for MCP path", () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     const result = vaultOnboardTool(store, dir);
     const parsed = JSON.parse(result.content[0]!.text) as {
       checklist: Array<{ id: string; done: boolean }>;
       human_summary: string;
+      setup_state: string;
+      primary_action: {
+        id: string;
+        do_this: string;
+        advanced_escape_hatch?: { cli_command: string };
+      };
+      what_to_do: string[];
+      elicitation_note: string;
+      never_edit: string[];
+      recovery: { code: string; howToFix: string };
+      progress: { phase: string };
+      trust_line: string;
     };
     expect(parsed.checklist.length).toBeGreaterThan(3);
     expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
     expect(parsed.human_summary).toMatch(/Welcome|Password Space/i);
-    const withProgress = JSON.parse(result.content[0]!.text) as {
-      progress: { phase: string };
-      trust_line: string;
+    expect(parsed.progress.phase).toMatch(/\d\/4/);
+    expect(parsed.trust_line).toMatch(/encrypted/i);
+    expect(parsed.setup_state).toBe("needs_init");
+    expect(parsed.primary_action.id).toBe("vault_init");
+    expect(parsed.primary_action.do_this).toMatch(/vault_init|approval form/i);
+    expect(parsed.primary_action.advanced_escape_hatch?.cli_command).toBe(
+      "password-space setup",
+    );
+    expect(parsed.what_to_do).toHaveLength(1);
+    expect(parsed.elicitation_note).toMatch(/never via MCP elicitation/i);
+    expect(parsed.never_edit).toContain("mcp.json");
+    expect(parsed.recovery.howToFix).toMatch(/vault_init|passphrase/i);
+    store.close();
+  });
+
+  it("vault_onboard guides unlock when vault already exists", async () => {
+    const dir = tempDir();
+    const store = new VaultStore(join(dir, "vault.db"));
+    await store.init("existing-vault-pass");
+    store.lock();
+    const result = vaultOnboardTool(store, dir);
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      setup_state: string;
+      primary_action: { id: string };
+      recovery: { code: string; howToFix: string };
+      human_summary: string;
     };
-    expect(withProgress.progress.phase).toMatch(/\d\/4/);
-    expect(withProgress.trust_line).toMatch(/encrypted/i);
-    const primary = JSON.parse(result.content[0]!.text) as {
-      primary_action: { id: string; do_this: string };
-    };
-    expect(primary.primary_action.id).toBe("cli_setup");
-    expect(primary.primary_action.do_this).toMatch(/password-space setup/i);
+    expect(parsed.setup_state).toBe("needs_unlock");
+    expect(parsed.primary_action.id).toBe("vault_unlock");
+    expect(parsed.recovery.code).toBe("vault_locked");
+    expect(parsed.recovery.howToFix).toMatch(/do not run vault_init/i);
+    expect(parsed.human_summary).toMatch(/already exists/i);
     store.close();
   });
 
@@ -232,14 +291,23 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
   });
 
-  it("vault_init refuses when already initialized", async () => {
+  it("vault_init refuses when already initialized with unlock recovery", async () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     await store.init("already-inited-xx");
     const result = await vaultInitTool(store, dir, { passphrase: "already-inited-xx" });
-    const parsed = JSON.parse(result.content[0]!.text) as { ok: boolean; error: string };
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      ok: boolean;
+      error: string;
+      code: string;
+      howToFix: string;
+      primary_action: { id: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toMatch(/already initialized/i);
+    expect(parsed.code).toBe("vault_already_exists");
+    expect(parsed.howToFix).toMatch(/vault_unlock/i);
+    expect(parsed.primary_action.id).toBe("vault_unlock");
     store.close();
   });
 });

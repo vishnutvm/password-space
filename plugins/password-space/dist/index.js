@@ -22055,6 +22055,7 @@ function lockVaultSession(opts = {}) {
 }
 
 // packages/mcp-server/src/tools.ts
+import { existsSync as existsSync4 } from "node:fs";
 function jsonResult(payload, opts) {
   const text = JSON.stringify(payload, null, 2);
   return {
@@ -22070,7 +22071,40 @@ var PassphraseRequiredError = class extends Error {
     this.name = "PassphraseRequiredError";
   }
 };
+var NodeVersionError = class extends Error {
+  code = "node_too_old";
+  found;
+  required;
+  constructor(found, requiredMajor) {
+    super(
+      `Password Space needs Node.js ${requiredMajor}+ (bundled MCP uses node:sqlite). Found ${found}.`
+    );
+    this.name = "NodeVersionError";
+    this.found = found;
+    this.required = `>=${requiredMajor}`;
+  }
+};
 var TRUST_LINE = "Your secrets stay encrypted on this device. Passphrases and tokens never belong in chat.";
+var MIN_NODE_MAJOR = 20;
+function checkPrerequisites(nodeVersion = process.version) {
+  const match = /^v(\d+)\./.exec(nodeVersion);
+  const nodeMajor = match ? Number(match[1]) : 0;
+  const nodeOk = nodeMajor >= MIN_NODE_MAJOR;
+  return {
+    ok: nodeOk,
+    node_version: nodeVersion,
+    node_major: nodeMajor,
+    node_ok: nodeOk,
+    required_node: `>=${MIN_NODE_MAJOR}`,
+    howToFix: nodeOk ? void 0 : `Install Node.js ${MIN_NODE_MAJOR} or newer from https://nodejs.org, then reload Cursor (MCP runs on the host Node).`
+  };
+}
+function assertNodeVersion(nodeVersion = process.version) {
+  const check2 = checkPrerequisites(nodeVersion);
+  if (!check2.node_ok) {
+    throw new NodeVersionError(check2.node_version, MIN_NODE_MAJOR);
+  }
+}
 function onboardingProgress(initialized, unlocked) {
   if (!initialized) {
     return {
@@ -22112,7 +22146,21 @@ function resolvePassphrase(toolArg) {
   }
   throw new PassphraseRequiredError();
 }
-function buildPrimaryAction(initialized, unlocked, session) {
+function resolveSetupState(opts) {
+  if (!opts.prereqOk) return "fix_node";
+  if (!opts.initialized) return "needs_init";
+  if (!opts.unlocked || !opts.session) return "needs_unlock";
+  return "ready";
+}
+function buildPrimaryAction(initialized, unlocked, session, prereqOk = true) {
+  if (!prereqOk) {
+    return {
+      id: "fix_node",
+      title: "Upgrade Node.js",
+      do_this: `Install Node.js ${MIN_NODE_MAJOR}+, then reload Cursor so the Password Space MCP can start.`,
+      never: "Do not edit mcp.json. Do not paste secrets into chat."
+    };
+  }
   const env = isPassphraseConfiguredInEnv();
   if (!initialized) {
     if (env) {
@@ -22121,17 +22169,25 @@ function buildPrimaryAction(initialized, unlocked, session) {
         title: "Create your vault",
         do_this: "Call vault_init once (passphrase is already in MCP Environment).",
         mcp_tool: "vault_init",
-        never: "Never paste the passphrase into chat."
+        never: "Never paste the passphrase into chat.",
+        advanced_escape_hatch: {
+          title: "CLI setup (advanced)",
+          cli_command: "password-space setup",
+          when: "Only if the user prefers Terminal over MCP approval forms."
+        }
       };
     }
     return {
-      id: "cli_setup",
+      id: "vault_init",
       title: "Create your vault",
-      do_this: "Run in Terminal: password-space setup \u2014 one hidden passphrase prompt, then you're done for this step.",
-      cli_command: "password-space setup",
+      do_this: "Call vault_init. When Cursor shows the approval form, type your passphrase (8+ characters) in the passphrase field, then approve.",
       mcp_tool: "vault_init",
-      never: "Never approve vault_init with an empty approval form {}.",
-      or_alternative: "No Terminal? Call vault_init and type your passphrase in the MCP approval form only."
+      never: "Never approve vault_init with an empty approval form {}. Never paste the passphrase into chat.",
+      advanced_escape_hatch: {
+        title: "CLI setup (advanced)",
+        cli_command: "password-space setup",
+        when: "Only if MCP approval forms keep failing empty, or the user asks for Terminal."
+      }
     };
   }
   if (!unlocked || !session) {
@@ -22141,16 +22197,25 @@ function buildPrimaryAction(initialized, unlocked, session) {
         title: "Unlock your vault",
         do_this: "Call vault_unlock (passphrase from MCP Environment).",
         mcp_tool: "vault_unlock",
-        never: "Never paste the passphrase into chat."
+        never: "Never paste the passphrase into chat.",
+        advanced_escape_hatch: {
+          title: "CLI unlock (advanced)",
+          cli_command: "password-space unlock",
+          when: "Only if the user prefers Terminal."
+        }
       };
     }
     return {
       id: "vault_unlock",
       title: "Unlock your vault",
-      do_this: "Run in Terminal: password-space setup (or unlock), OR call vault_unlock with passphrase in the approval form.",
-      cli_command: "password-space unlock",
+      do_this: "Call vault_unlock. Enter the same passphrase in the MCP approval form, then approve.",
       mcp_tool: "vault_unlock",
-      never: "Never approve vault_unlock with an empty passphrase field."
+      never: "Never approve vault_unlock with an empty passphrase field. Never paste it into chat.",
+      advanced_escape_hatch: {
+        title: "CLI unlock (advanced)",
+        cli_command: "password-space unlock",
+        when: "Only if the user prefers Terminal."
+      }
     };
   }
   return {
@@ -22171,7 +22236,7 @@ function buildOnboardingSteps(initialized, unlocked, session) {
       title: "Welcome",
       done: true,
       tool: "vault_onboard",
-      user_action: "You're in the right place. We'll guide you through four short steps."
+      user_action: "You're in the right place. One path: /setup-password-space \u2192 follow primary_action."
     },
     {
       id: "init",
@@ -22207,53 +22272,131 @@ function buildOnboardingSteps(initialized, unlocked, session) {
     }
   ];
 }
+function recoveryGuidance(opts) {
+  switch (opts.setup_state) {
+    case "fix_node":
+      return {
+        code: "node_too_old",
+        howToFix: `Install Node.js ${MIN_NODE_MAJOR}+ from https://nodejs.org, then reload Cursor.`,
+        what_to_do: [
+          `Confirm \`node -v\` shows v${MIN_NODE_MAJOR} or newer.`,
+          "Reload the Cursor window so MCP restarts on the new Node.",
+          "Run /setup-password-space again."
+        ]
+      };
+    case "needs_init":
+      return {
+        code: opts.dbExists ? "setup_incomplete" : "vault_missing",
+        howToFix: opts.dbExists ? "Setup was interrupted before the vault finished. Call vault_init again and enter your passphrase in the approval form (not empty {})." : "Call vault_init and type your passphrase in the MCP approval form.",
+        what_to_do: [
+          "Call vault_init once.",
+          "Fill the passphrase field (8+ characters) \u2014 never approve empty {}.",
+          "Then call vault_unlock with the same passphrase.",
+          "Advanced only: `password-space setup` in Terminal if forms keep failing."
+        ]
+      };
+    case "needs_unlock":
+      return {
+        code: "vault_locked",
+        howToFix: "Your vault already exists. Call vault_unlock and enter your passphrase in the approval form \u2014 do not run vault_init again.",
+        what_to_do: [
+          "Call vault_unlock (not vault_init).",
+          "Enter the same passphrase in the form.",
+          "If unlock fails with wrong passphrase, retry carefully \u2014 there is no recovery without it."
+        ]
+      };
+    default:
+      return {
+        code: "ready",
+        howToFix: "Vault is ready. Save a credential with vault_set_secret.",
+        what_to_do: [
+          "Call vault_set_secret with name + value in the approval form.",
+          "Use inject_secret when the agent needs the value."
+        ]
+      };
+  }
+}
 function vaultOnboardTool(store, dataDir2) {
+  const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
   const unlocked = store.isUnlocked;
   const session = hasValidSession(sessionPath(dataDir2));
+  const dbPath = vaultDbPath(dataDir2);
+  const dbExists = existsSync4(dbPath);
+  const setup_state = resolveSetupState({
+    prereqOk: prereq.ok,
+    initialized,
+    unlocked,
+    session
+  });
   const steps = buildOnboardingSteps(initialized, unlocked, session);
-  const primary_action = buildPrimaryAction(initialized, unlocked, session);
-  const ready = initialized && unlocked;
+  const primary_action = buildPrimaryAction(initialized, unlocked, session, prereq.ok);
+  const ready = initialized && unlocked && prereq.ok;
+  const recovery = recoveryGuidance({ setup_state, initialized, dbExists });
   const progress = onboardingProgress(initialized, unlocked);
-  const human_summary = !initialized ? "Welcome to Password Space. Let's create your private vault on this device." : !unlocked ? "Your vault is ready. Unlock it to store and use credentials." : "You're protected. Save a credential whenever you're ready.";
+  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? "Welcome to Password Space. One step next: create your private vault on this device." : !unlocked || !session ? "Your vault already exists. Unlock it to continue \u2014 do not create a new one." : "You're protected. Save a credential whenever you're ready.";
   return jsonResult({
-    ok: true,
+    ok: prereq.ok,
+    setup_state,
     data_dir: dataDir2,
+    db_path: dbPath,
+    db_exists: dbExists,
     initialized,
     unlocked,
     session,
+    prerequisites: prereq,
     passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     checklist: steps,
     human_summary,
+    /** Exactly one primary next step — agents must follow this only. */
     primary_action,
     next_tool: primary_action.mcp_tool ?? (ready ? "vault_set_secret" : "vault_status"),
-    what_to_do: steps.filter((s) => !s.done && s.user_action).slice(0, 2).map((s) => `${s.phase} ${s.title}: ${s.user_action}`),
-    never_paste_in_chat: ["passphrase", "secret values"]
+    recovery,
+    what_to_do: [primary_action.do_this],
+    never_paste_in_chat: ["passphrase", "secret values"],
+    never_edit: ["mcp.json"],
+    elicitation_note: "Passphrase is collected only via tool approval args, PASSWORD_SPACE_PASSPHRASE env, or CLI \u2014 never via MCP elicitation."
   });
 }
 function vaultStatusTool(store, dataDir2) {
+  const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
   const unlocked = store.isUnlocked;
   const session = hasValidSession(sessionPath(dataDir2));
+  const dbPath = vaultDbPath(dataDir2);
+  const dbExists = existsSync4(dbPath);
+  const setup_state = resolveSetupState({
+    prereqOk: prereq.ok,
+    initialized,
+    unlocked,
+    session
+  });
   const steps = buildOnboardingSteps(initialized, unlocked, session);
   const passphraseEnv = isPassphraseConfiguredInEnv();
+  const primary_action = buildPrimaryAction(initialized, unlocked, session, prereq.ok);
+  const recovery = recoveryGuidance({ setup_state, initialized, dbExists });
   const progress = onboardingProgress(initialized, unlocked);
-  const next = !initialized ? "Next: vault_init \u2014 enter your passphrase in the approval form when prompted." : !unlocked ? "Next: vault_unlock \u2014 same passphrase, approval form only." : "You're ready. Use vault_set_secret, then inject_secret when needed.";
+  const next = primary_action.do_this;
   return jsonResult({
-    ok: true,
+    ok: prereq.ok,
+    setup_state,
     data_dir: dataDir2,
-    db_path: vaultDbPath(dataDir2),
+    db_path: dbPath,
+    db_exists: dbExists,
     initialized,
     unlocked,
     session,
     secret_count: unlocked ? store.listSecrets().length : null,
+    prerequisites: prereq,
     passphrase_env_configured: passphraseEnv,
     trust_line: TRUST_LINE,
     progress,
     headline: progress.headline,
+    primary_action,
     next,
+    recovery,
     next_steps: steps.filter((s) => !s.done).map((s) => ({
       phase: s.phase,
       step: s.title,
@@ -22264,12 +22407,20 @@ function vaultStatusTool(store, dataDir2) {
   });
 }
 async function vaultInitTool(store, dataDir2, args) {
+  assertNodeVersion();
   if (store.isInitialized()) {
     return jsonResult({
       ok: false,
+      code: "vault_already_exists",
       error: "Vault already initialized",
       data_dir: dataDir2,
-      hint: "Call vault_status or vault_unlock."
+      db_path: vaultDbPath(dataDir2),
+      howToFix: "Your vault already exists. Call vault_unlock with your passphrase \u2014 do not create a second vault.",
+      what_to_do: [
+        "Call vault_unlock and enter the same passphrase in the approval form.",
+        "Then vault_set_secret to save credentials."
+      ],
+      primary_action: buildPrimaryAction(true, false, false, true)
     });
   }
   const passphrase = resolvePassphrase(args.passphrase);
@@ -22279,11 +22430,14 @@ async function vaultInitTool(store, dataDir2, args) {
     initialized: true,
     data_dir: dataDir2,
     db_path: vaultDbPath(dataDir2),
+    setup_state: "needs_unlock",
     next: "Call vault_unlock with the same passphrase (or PASSWORD_SPACE_PASSPHRASE), then vault_set_secret.",
+    primary_action: buildPrimaryAction(true, false, false, true),
     note: "Passphrase was not returned and must not be pasted into chat."
   });
 }
 async function vaultUnlockTool(dataDir2, args) {
+  assertNodeVersion();
   const passphrase = resolvePassphrase(args.passphrase);
   const ttlHours = args.ttl_hours ?? 8;
   const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1e3;
@@ -22596,23 +22750,37 @@ server.tool(
 function errorResult(err) {
   const message = err instanceof Error ? err.message : String(err);
   const payload = { ok: false, error: message };
-  if (err instanceof PassphraseRequiredError) {
+  if (err instanceof NodeVersionError) {
     payload.code = err.code;
-    payload.howToFix = "Open the approval form again, enter your vault passphrase, then approve.";
+    payload.found = err.found;
+    payload.required = err.required;
+    payload.howToFix = "Install Node.js 20+ from https://nodejs.org, then reload Cursor. Do not edit mcp.json.";
+    payload.what_to_do = [
+      "Run `node -v` in Terminal \u2014 it must be v20 or newer.",
+      "Reload the Cursor window.",
+      "Run /setup-password-space again."
+    ];
+  } else if (err instanceof PassphraseRequiredError) {
+    payload.code = err.code;
+    payload.howToFix = "Open the approval form again, enter your vault passphrase, then approve. Do not approve with empty {}.";
     payload.what_happened = "The passphrase field was empty.";
     payload.what_to_do = [
       "Type your passphrase in the approval form \u2014 don't approve with empty fields.",
       "Optional: Settings \u2192 MCP \u2192 password-space \u2192 Environment \u2192 PASSWORD_SPACE_PASSPHRASE.",
-      "Run vault_onboard for the full guided checklist."
+      "Run /setup-password-space (vault_onboard) for the single guided path.",
+      "Advanced escape hatch only: `password-space setup` in Terminal."
     ];
   } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
     payload.code = "passphrase_too_short";
     payload.howToFix = "Choose a passphrase with at least 8 characters, then try again.";
     payload.what_to_do = ["Use 8 or more characters for your vault passphrase."];
+  } else if (/Wrong passphrase/i.test(message)) {
+    payload.code = "wrong_passphrase";
+    payload.howToFix = "That passphrase did not unlock the vault. Retry vault_unlock carefully \u2014 there is no recovery without the correct passphrase.";
   } else if (/locked/i.test(message)) {
     payload.howToFix = "Run vault_unlock and enter your passphrase in the approval form.";
   } else if (/not set up|not initialized/i.test(message)) {
-    payload.howToFix = "Run vault_onboard, then vault_init to create your vault.";
+    payload.howToFix = "Run /setup-password-space, then approve vault_init with your passphrase in the form.";
   }
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],

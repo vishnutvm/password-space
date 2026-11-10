@@ -29,7 +29,7 @@ function main() {
     JSON.stringify({
       continue: true,
       additional_context:
-        "Password Space: vault not set up — call vault_onboard and follow primary_action (prefer Terminal: password-space setup; never approve vault_init with empty {}).",
+        "Password Space: vault not set up — run /setup-password-space, call vault_onboard, follow the single primary_action (vault_init with passphrase in the approval form — never empty {}). Do not ask the user to edit mcp.json.",
     }),
   );
 }

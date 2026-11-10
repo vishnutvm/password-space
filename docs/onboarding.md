@@ -8,17 +8,16 @@ Password Space keeps your API keys and passwords **on your Mac**, **encrypted**,
 
 1. **Cursor → Settings → Plugins** (or team marketplace).
 2. Import `https://github.com/vishnutvm/password-space` and install **password-space**.
+3. Ensure **Node.js 20+** (`node -v`), then reload Cursor.
 
-## Set up (four steps)
+## Set up (one path)
 
 | Step | You do | Agent calls |
 | --- | --- | --- |
-| **1. Welcome** | Ask to get started | `vault_onboard` |
+| **1. Welcome** | Run **`/setup-password-space`** | `vault_onboard` |
 | **2. Secure** | Enter passphrase in **approval form** (8+ chars) | `vault_init` |
 | **3. Unlock** | Same passphrase in approval form | `vault_unlock` |
 | **4. Save** | Name + token in approval form only | `vault_set_secret` |
-
-**Fast path in chat:** `/setup-password-space`
 
 ### The one rule people miss
 
@@ -29,6 +28,10 @@ When Cursor shows **Run tool**, fill in the **passphrase** field. Approving with
 **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`  
 Never put that value in chat.
 
+### Advanced only
+
+CLI `password-space setup` is a power-user escape hatch — not the default path. See [EXTERNAL_USER_INSTALL.md](./EXTERNAL_USER_INSTALL.md).
+
 ## Daily use
 
 - **Status:** `vault_status`
@@ -37,6 +40,6 @@ Never put that value in chat.
 
 ## Need help?
 
-Say: *“Walk me through Password Space setup.”* The agent should call `vault_onboard` and explain the current step in plain language.
+Say: *“Walk me through Password Space setup.”* The agent should call `vault_onboard` and explain the **single** `primary_action` in plain language — no `mcp.json`, no competing CLI vs chat options.
 
-More detail: [plugin README](../plugins/password-space/README.md) · [Security](../SECURITY.md)
+More: [zero-friction-v1.md](./zero-friction-v1.md) · [plugin README](../plugins/password-space/README.md) · [Security](../SECURITY.md)
