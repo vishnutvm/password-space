@@ -109,6 +109,7 @@ Usage:
   password-space <command> [options]
 
 Commands:
+  setup                Interactive create + unlock (best first run)
   onboard              Print setup steps (same checklist as vault_onboard)
   init                 Create a new encrypted vault
   unlock               Unlock vault for this machine session
@@ -144,6 +145,65 @@ async function getPassphrase(flags: Record<string, string | boolean>, prompt: st
   return promptHidden(prompt);
 }
 
+async function promptNewPassphrase(
+  flags: Record<string, string | boolean>,
+): Promise<string> {
+  const pass = await getPassphrase(flags, "Passphrase (8+ characters, hidden): ");
+  if (pass.length < 8) {
+    throw new VaultError("Passphrase must be at least 8 characters", "INVALID");
+  }
+  if (process.env.PASSWORD_SPACE_PASSPHRASE) return pass;
+  const confirm = await getPassphrase({}, "Confirm passphrase (hidden): ");
+  if (pass !== confirm) {
+    throw new VaultError("Passphrases do not match", "INVALID");
+  }
+  return pass;
+}
+
+async function runSetupWizard(
+  dataDir: string,
+  flags: Record<string, string | boolean>,
+): Promise<void> {
+  const ttlHours = Number(flags.ttl ?? 8);
+  console.log(`
+Password Space — setup
+──────────────────────
+• Vault: encrypted on this Mac (${dataDir})
+• Your passphrase is entered here only — never in Cursor chat
+`);
+
+  const probe = openVault({ dataDir, useSession: true });
+  const initialized = probe.isInitialized();
+  const needsUnlock = !probe.isUnlocked || !hasValidSession(sessionPath(dataDir));
+  probe.close();
+
+  let passphrase: string | undefined;
+  if (!initialized) {
+    passphrase = await promptNewPassphrase(flags);
+    const store = openVault({ dataDir, useSession: false });
+    await store.init(passphrase);
+    store.close();
+    console.log(`✓ Vault created at ${vaultDbPath(dataDir)}`);
+  }
+
+  if (!initialized || needsUnlock) {
+    const pass =
+      passphrase ??
+      (await getPassphrase(flags, "Unlock passphrase (hidden): "));
+    const { expiresAt } = await unlockVaultToSession(pass, {
+      dataDir,
+      ttlMs: ttlHours * 60 * 60 * 1000,
+    });
+    console.log(`✓ Unlocked until ${expiresAt}`);
+  }
+
+  console.log(`
+Done. Back in Cursor:
+  • Ask the agent to run vault_status
+  • Save a token with vault_set_secret (approval form only)
+`);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
   const dataDir = dataDirFrom(args.flags);
@@ -156,37 +216,30 @@ async function main(): Promise<void> {
         printHelp();
         break;
 
+      case "setup": {
+        await runSetupWizard(dataDir, args.flags);
+        break;
+      }
+
       case "onboard": {
         const store = openVault({ dataDir, useSession: true });
         const initialized = store.isInitialized();
         const unlocked = store.isUnlocked;
         const session = hasValidSession(sessionPath(dataDir));
         store.close();
-        const steps = [
-          { title: "Check status", done: true, cmd: "password-space status" },
-          {
-            title: "Create vault (first time)",
-            done: initialized,
-            cmd: "password-space init",
-          },
-          {
-            title: "Unlock for this session",
-            done: unlocked && session,
-            cmd: "password-space unlock",
-          },
-          { title: "Store a secret", done: false, cmd: "password-space set NAME" },
-        ];
-        console.log("Password Space setup checklist\n");
-        for (const s of steps) {
-          const mark = s.done ? "[x]" : "[ ]";
-          console.log(`${mark} ${s.title}  →  ${s.cmd}`);
+
+        if (!initialized) {
+          console.log("Password Space — next step\n");
+          console.log("  →  password-space setup");
+          console.log("\nOne Terminal wizard (create + unlock). Avoids MCP approval confusion.");
+          console.log("Alternative in Cursor: vault_init with passphrase in the tool form — never empty {}.");
+          break;
         }
-        console.log(
-          "\nIn Cursor, prefer MCP vault_onboard / setup-password-space — passphrases stay out of chat.",
-        );
-        if (!initialized) console.log("Next: password-space init");
-        else if (!unlocked) console.log("Next: password-space unlock");
-        else console.log("Next: password-space set <NAME>");
+        if (!unlocked || !session) {
+          console.log("Next: password-space unlock   (or vault_unlock in Cursor)");
+          break;
+        }
+        console.log("Vault ready. Next: password-space set <NAME>  or vault_set_secret in Cursor");
         break;
       }
 

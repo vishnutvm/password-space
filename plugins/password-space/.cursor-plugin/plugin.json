@@ -1,7 +1,7 @@
 {
   "name": "password-space",
   "version": "0.1.0",
-  "description": "Your private credential vault for Cursor — encrypted on your device, built so agents never need secrets in chat.",
+  "description": "Install · Create vault · Use secrets — no secrets in chat.",
   "author": {
     "name": "Vishnu",
     "email": "vishnutvm@users.noreply.github.com"

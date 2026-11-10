@@ -10,6 +10,7 @@ import {
   listSecretsTool,
   PassphraseRequiredError,
   resolvePassphrase,
+  buildPrimaryAction,
   vaultOnboardTool,
   resolveSecretTool,
   vaultInitTool,
@@ -126,6 +127,13 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
   });
 
+  it("buildPrimaryAction prefers cli_setup when vault missing", () => {
+    const action = buildPrimaryAction(false, false, false);
+    expect(action.id).toBe("cli_setup");
+    expect(action.cli_command).toBe("password-space setup");
+    expect(action.never).toMatch(/empty/i);
+  });
+
   it("vault_onboard returns checklist without secrets", () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
@@ -143,6 +151,11 @@ describe("vault lifecycle MCP tools", () => {
     };
     expect(withProgress.progress.phase).toMatch(/\d\/4/);
     expect(withProgress.trust_line).toMatch(/encrypted/i);
+    const primary = JSON.parse(result.content[0]!.text) as {
+      primary_action: { id: string; do_this: string };
+    };
+    expect(primary.primary_action.id).toBe("cli_setup");
+    expect(primary.primary_action.do_this).toMatch(/password-space setup/i);
     store.close();
   });
 

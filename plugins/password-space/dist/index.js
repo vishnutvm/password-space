@@ -22112,6 +22112,55 @@ function resolvePassphrase(toolArg) {
   }
   throw new PassphraseRequiredError();
 }
+function buildPrimaryAction(initialized, unlocked, session) {
+  const env = isPassphraseConfiguredInEnv();
+  if (!initialized) {
+    if (env) {
+      return {
+        id: "vault_init_env",
+        title: "Create your vault",
+        do_this: "Call vault_init once (passphrase is already in MCP Environment).",
+        mcp_tool: "vault_init",
+        never: "Never paste the passphrase into chat."
+      };
+    }
+    return {
+      id: "cli_setup",
+      title: "Create your vault",
+      do_this: "Run in Terminal: password-space setup \u2014 one hidden passphrase prompt, then you're done for this step.",
+      cli_command: "password-space setup",
+      mcp_tool: "vault_init",
+      never: "Never approve vault_init with an empty approval form {}.",
+      or_alternative: "No Terminal? Call vault_init and type your passphrase in the MCP approval form only."
+    };
+  }
+  if (!unlocked || !session) {
+    if (env) {
+      return {
+        id: "vault_unlock_env",
+        title: "Unlock your vault",
+        do_this: "Call vault_unlock (passphrase from MCP Environment).",
+        mcp_tool: "vault_unlock",
+        never: "Never paste the passphrase into chat."
+      };
+    }
+    return {
+      id: "vault_unlock",
+      title: "Unlock your vault",
+      do_this: "Run in Terminal: password-space setup (or unlock), OR call vault_unlock with passphrase in the approval form.",
+      cli_command: "password-space unlock",
+      mcp_tool: "vault_unlock",
+      never: "Never approve vault_unlock with an empty passphrase field."
+    };
+  }
+  return {
+    id: "vault_set_secret",
+    title: "Save a credential",
+    do_this: "Call vault_set_secret \u2014 enter name and value in the MCP approval form only.",
+    mcp_tool: "vault_set_secret",
+    never: "Never paste API keys or passwords into chat."
+  };
+}
 function buildOnboardingSteps(initialized, unlocked, session) {
   const envPassphrase = isPassphraseConfiguredInEnv();
   const passphraseHint = envPassphrase ? "Your passphrase can load from MCP Environment, or you can type it in the approval form." : "When Cursor asks to approve the tool, enter your passphrase in the form \u2014 not an empty approval.";
@@ -22163,7 +22212,7 @@ function vaultOnboardTool(store, dataDir2) {
   const unlocked = store.isUnlocked;
   const session = hasValidSession(sessionPath(dataDir2));
   const steps = buildOnboardingSteps(initialized, unlocked, session);
-  const nextIncomplete = steps.find((s) => !s.done && s.id !== "check" && s.id !== "use" && s.id !== "store");
+  const primary_action = buildPrimaryAction(initialized, unlocked, session);
   const ready = initialized && unlocked;
   const progress = onboardingProgress(initialized, unlocked);
   const human_summary = !initialized ? "Welcome to Password Space. Let's create your private vault on this device." : !unlocked ? "Your vault is ready. Unlock it to store and use credentials." : "You're protected. Save a credential whenever you're ready.";
@@ -22178,7 +22227,8 @@ function vaultOnboardTool(store, dataDir2) {
     progress,
     checklist: steps,
     human_summary,
-    next_tool: ready ? "vault_set_secret" : nextIncomplete?.tool ?? "vault_status",
+    primary_action,
+    next_tool: primary_action.mcp_tool ?? (ready ? "vault_set_secret" : "vault_status"),
     what_to_do: steps.filter((s) => !s.done && s.user_action).slice(0, 2).map((s) => `${s.phase} ${s.title}: ${s.user_action}`),
     never_paste_in_chat: ["passphrase", "secret values"]
   });

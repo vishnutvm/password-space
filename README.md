@@ -58,7 +58,7 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 
 ## Quickstart (Cursor plugin — primary)
 
-**[Getting started in 2 minutes](./docs/onboarding.md)** — install, four setup steps, trust model.
+**[External user install](./docs/EXTERNAL_USER_INSTALL.md)** · **[Getting started in 2 minutes](./docs/onboarding.md)**
 
 Day-1 setup does **not** require `git clone` or `pnpm`.
 
