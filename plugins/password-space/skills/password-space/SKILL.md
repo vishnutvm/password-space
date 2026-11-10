@@ -1,18 +1,18 @@
 ---
 name: password-space
-description: Install · Create vault · Use secrets — no secrets in chat. Follow vault_onboard primary_action; prefer password-space setup in Terminal when vault is missing.
+description: Install · One-time Setup · Start Using. Follow vault_onboard primary_action only — MCP approval form path for newcomers; never ask users to edit mcp.json.
 ---
 
 # Password Space
 
-Encrypted vault on the user's Mac. **One obvious next step** — no debug dumps.
+Encrypted vault on the user's Mac. **One obvious next step** — no competing paths, no MCP/CLI jargon.
 
-## When vault is missing
+## Newcomer path (only path to present)
 
-1. Call **`vault_onboard`**.
-2. Follow **`primary_action.do_this` exactly** (usually **`password-space setup`** in Terminal).
-3. Only use **`primary_action.or_alternative`** if they cannot use Terminal.
-4. **Never** approve **`vault_init`** / **`vault_unlock`** with empty `{}`.
+1. User runs **`/setup-password-space`** (or asks to set up Password Space).
+2. Call **`vault_onboard`**.
+3. Follow **`primary_action.do_this` exactly** — that is the **only** next step.
+4. Passphrase goes in the **MCP approval form** (or MCP Environment) — **never** in chat, **never** via elicitation.
 
 ## After vault exists
 
@@ -23,11 +23,15 @@ Encrypted vault on the user's Mac. **One obvious next step** — no debug dumps.
 ## Never
 
 - Passphrase or secret values in chat
-- Multiple competing setup paths in one message
-- Plugin Configure `variables` (not supported — use MCP Environment)
+- Ask the user to edit **`mcp.json`** or explain MCP
+- Offer CLI and slash setup as equal choices
+- Approve **`vault_init`** / **`vault_unlock`** with empty `{}`
+- Call **`vault_init`** again when `setup_state` is `needs_unlock` / vault already exists
+
+## Advanced escape hatch (only if user asks for Terminal)
+
+`primary_action.advanced_escape_hatch` may mention `password-space setup` / `unlock`. Do **not** lead with it for newcomers.
 
 Optional env: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`.
 
-Command: **`/setup-password-space`**.
-
-Safe line: *"Next step: run `password-space setup` in Terminal — one hidden passphrase. I won't ask for it here."*
+Safe line: *"Next step: I'll call vault_init — type your passphrase in the approval form when Cursor asks. I won't ask for it in chat."*

@@ -230,16 +230,17 @@ async function main(): Promise<void> {
 
         if (!initialized) {
           console.log("Password Space — next step\n");
-          console.log("  →  password-space setup");
-          console.log("\nOne Terminal wizard (create + unlock). Avoids MCP approval confusion.");
-          console.log("Alternative in Cursor: vault_init with passphrase in the tool form — never empty {}.");
+          console.log("  Newcomers (recommended): In Cursor run /setup-password-space");
+          console.log("    → approve vault_init and type passphrase in the form (never empty {}).");
+          console.log("\n  Advanced escape hatch: password-space setup");
           break;
         }
         if (!unlocked || !session) {
-          console.log("Next: password-space unlock   (or vault_unlock in Cursor)");
+          console.log("Next: vault_unlock in Cursor (passphrase in approval form)");
+          console.log("  Advanced: password-space unlock");
           break;
         }
-        console.log("Vault ready. Next: password-space set <NAME>  or vault_set_secret in Cursor");
+        console.log("Vault ready. Next: vault_set_secret in Cursor  (or password-space set <NAME>)");
         break;
       }
 
