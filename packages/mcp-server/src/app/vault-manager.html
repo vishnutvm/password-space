@@ -6,145 +6,129 @@
     <title>Password Space — Vault Manager</title>
     <style>
       :root {
-        --ink: #1a1f1c;
-        --muted: #5c6b63;
-        --paper: #f3f6f2;
-        --panel: rgba(255, 255, 255, 0.72);
-        --line: rgba(26, 31, 28, 0.12);
-        --accent: #0f6b4c;
-        --accent-ink: #f4fff9;
-        --danger: #9b2c2c;
-        --ok: #0f6b4c;
-        --err: #9b2c2c;
-        --shadow: 0 18px 50px rgba(20, 40, 30, 0.12);
-        --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-        --font-body: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+        --ink: #1c1c1c;
+        --muted: #666;
+        --bg: #f7f7f5;
+        --panel: #fff;
+        --line: #ddd;
+        --accent: #1a5f45;
+        --accent-ink: #fff;
+        --danger: #8b1e1e;
+        --ok: #1a5f45;
+        --err: #8b1e1e;
+        --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
       }
       * { box-sizing: border-box; }
       html, body {
         margin: 0;
         min-height: 100%;
-        font-family: var(--font-body);
+        font-family: var(--font);
+        font-size: 15px;
         color: var(--ink);
-        background:
-          radial-gradient(1200px 600px at 10% -10%, rgba(15, 107, 76, 0.16), transparent 55%),
-          radial-gradient(900px 500px at 100% 0%, rgba(40, 70, 55, 0.12), transparent 50%),
-          linear-gradient(165deg, #e8eee8 0%, var(--paper) 45%, #eef3ef 100%);
+        background: var(--bg);
       }
       .shell {
-        max-width: 720px;
+        max-width: 420px;
         margin: 0 auto;
-        padding: 28px 20px 40px;
+        padding: 24px 16px 32px;
       }
-      .hero {
-        margin-bottom: 22px;
-        animation: rise 520ms ease-out both;
-      }
-      .brand {
-        margin: 0 0 8px;
-        font-family: var(--font-display);
-        font-size: clamp(2rem, 5vw, 2.6rem);
-        font-weight: 700;
-        letter-spacing: -0.03em;
-        line-height: 1.05;
-      }
-      .hero h1 {
-        margin: 0;
-        font-size: 0.95rem;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--muted);
-      }
-      .lede {
-        margin: 12px 0 0;
-        max-width: 36rem;
-        color: var(--muted);
-        line-height: 1.45;
+      h1 {
+        margin: 0 0 16px;
+        font-size: 1.15rem;
+        font-weight: 600;
       }
       .panel {
         background: var(--panel);
         border: 1px solid var(--line);
-        backdrop-filter: blur(10px);
-        border-radius: 18px;
-        padding: 18px 18px 16px;
-        margin-bottom: 14px;
-        box-shadow: var(--shadow);
-        animation: rise 640ms ease-out both;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 12px;
       }
-      .panel h2, .panel h3 {
-        margin: 0 0 10px;
-        font-family: var(--font-display);
-        font-size: 1.25rem;
-        letter-spacing: -0.02em;
+      .panel h2 {
+        margin: 0 0 12px;
+        font-size: 1rem;
+        font-weight: 600;
       }
-      .panel h3 { font-size: 1.05rem; margin-top: 16px; }
-      .hint, .muted { color: var(--muted); font-size: 0.9rem; line-height: 1.4; }
+      .hint {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1.35;
+      }
       label {
         display: grid;
-        gap: 6px;
-        margin: 10px 0;
-        font-size: 0.85rem;
-        font-weight: 500;
+        gap: 4px;
+        margin: 0 0 10px;
+        font-size: 0.8rem;
+        color: var(--muted);
       }
       input {
         width: 100%;
         border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 11px 12px;
+        border-radius: 6px;
+        padding: 10px 10px;
         font: inherit;
-        background: rgba(255,255,255,0.9);
         color: var(--ink);
+        background: #fff;
       }
       input:focus {
-        outline: 2px solid rgba(15, 107, 76, 0.35);
+        outline: 2px solid rgba(26, 95, 69, 0.3);
         border-color: var(--accent);
       }
-      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-      .row.between { justify-content: space-between; }
+      .actions { margin-top: 4px; }
       button {
         border: 0;
-        border-radius: 999px;
-        padding: 10px 16px;
+        border-radius: 6px;
+        padding: 10px 14px;
         font: inherit;
         font-weight: 600;
         cursor: pointer;
-        transition: transform 120ms ease, opacity 120ms ease;
       }
-      button:hover { transform: translateY(-1px); }
-      button:active { transform: translateY(0); }
-      .primary { background: var(--accent); color: var(--accent-ink); }
-      .ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
-      .danger { background: transparent; color: var(--danger); border: 1px solid rgba(155,44,44,0.25); padding: 6px 12px; font-size: 0.8rem; }
-      .list { list-style: none; margin: 0; padding: 0; }
+      .primary {
+        width: 100%;
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      .ghost {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        padding: 8px 12px;
+        font-weight: 500;
+      }
+      .danger {
+        background: transparent;
+        color: var(--danger);
+        border: 1px solid rgba(139, 30, 30, 0.25);
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        font-weight: 500;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .list { list-style: none; margin: 0 0 14px; padding: 0; }
       .list li {
         display: flex;
         justify-content: space-between;
-        gap: 12px;
+        gap: 10px;
         align-items: center;
-        padding: 12px 0;
+        padding: 10px 0;
         border-bottom: 1px solid var(--line);
       }
       .list li:last-child { border-bottom: 0; }
-      .tags { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
-      .empty { color: var(--muted); padding: 8px 0; }
+      .empty { color: var(--muted); padding: 4px 0; }
       .foot {
-        min-height: 1.4em;
-        margin: 8px 2px 0;
-        font-size: 0.9rem;
+        min-height: 1.25em;
+        margin: 8px 0 0;
+        font-size: 0.85rem;
         color: var(--muted);
-        animation: fade 280ms ease both;
       }
       .foot[data-kind="ok"] { color: var(--ok); }
       .foot[data-kind="err"] { color: var(--err); }
-      @keyframes rise {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes fade {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
     </style>
   </head>
   <body>
