@@ -24,7 +24,7 @@ Do **not** edit `~/.cursor/mcp.json` unless you maintain a manual MCP entry your
 2. **Reload Cursor** (Cmd+Shift+P → *Developer: Reload Window*) so MCP and hooks load cleanly.
 3. **Enable tools:** Settings → MCP → confirm **password-space** is on and tools are allowed for the agent.
 4. In chat, run **`/setup-password-space`** or ask: *"Set up Password Space with vault_onboard."*
-5. On **`vault_init`** / **`vault_unlock`** approval, type your **passphrase** (8+ characters) in the form — **not** an empty approval. If you already have `~/.password-space/vault.db`, use the **same** passphrase you created before.
+5. Follow **`primary_action`**: open **Vault Manager** first. If using tool approval for **`vault_init`** / **`vault_unlock`**, type your **passphrase** (8+ characters) in the form — **not** an empty approval. If you already have `~/.password-space/vault.db`, use the **same** passphrase you created before.
 
 ## Success checks
 
