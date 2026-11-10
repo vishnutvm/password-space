@@ -2,26 +2,26 @@
 description: Set up Password Space — one clear next step, no passphrase in chat
 ---
 
-Setup for a **non-technical** user. **Never** ask for passphrase or tokens in chat.
+Setup for a **non-technical** user. **Never** ask for passphrase or tokens in chat. **Never** ask them to edit `mcp.json`.
 
 ## Start
 
 1. Call **`vault_onboard`**.
 2. Read **`primary_action`** aloud in plain language — that is the **only** next step.
-3. Do **not** offer multiple parallel paths unless `primary_action.or_alternative` exists.
+3. Do **not** offer CLI and in-chat setup as competing choices.
+4. Ignore `advanced_escape_hatch` unless the user asks for Terminal.
 
-## If vault does not exist yet (`primary_action.id` = `cli_setup`)
+## If Node is too old (`primary_action.id` = `fix_node`)
 
-**Primary (do this first):** Tell the user to open Terminal and run **`password-space setup`** (from repo: `pnpm password-space setup`).
+Tell them to install **Node.js 20+** from https://nodejs.org, reload Cursor, then run this command again.
 
-- One hidden passphrase prompt — no MCP `{}` confusion.
-- When they return to chat, call **`vault_status`** to confirm.
+## If vault does not exist (`primary_action.id` = `vault_init` or `vault_init_env`)
 
-**Only if Terminal is impossible:** Call **`vault_init`** and insist they enter passphrase in the **approval form** — **never** approve empty `{}`.
+Call **`vault_init`**. Insist they enter the passphrase in the **approval form** — **never** approve empty `{}`.
 
-## If vault exists but locked
+## If vault exists but locked (`primary_action.id` = `vault_unlock` / `vault_unlock_env`)
 
-Follow **`primary_action`** (`password-space unlock` or **`vault_unlock`** with form).
+Call **`vault_unlock`** — **do not** call `vault_init` again.
 
 ## If vault ready
 
@@ -30,5 +30,6 @@ Follow **`primary_action`** (`password-space unlock` or **`vault_unlock`** with 
 ## Rules
 
 - One primary action per turn until `vault_status` shows unlocked.
-- Summarize errors using **`howToFix`** — never dump JSON.
+- Summarize errors using **`howToFix` / `recovery`** — never dump JSON.
 - Confirm success without secret values.
+- Passphrase never via elicitation — only tool args, MCP Environment, or advanced CLI.
