@@ -32,10 +32,10 @@ Decrypted values can exist in:
 
 - CLI/`get` and MCP `resolve_secret` tool results
 - Process memory while a secret is handled
-- Inject `*.env` files until deleted
+- Inject `*.env` files until deleted (expired files are cleaned on unlock/inject/lock)
 - An unlocked session file on disk
 
-Minimize lifetime: prefer `inject_secret`, delete inject files after use, run `password-space lock` when idle.
+Minimize lifetime: prefer `inject_secret`, delete inject files after use, run `password-space lock` when idle. Repeated wrong unlock attempts are rate-limited locally.
 
 ### MCP access
 
