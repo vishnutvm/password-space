@@ -38,9 +38,9 @@ function jsonResult(
 
 /** Cursor often approves vault_init/unlock with empty {} and no passphrase field. */
 export const HOST_LIMITATION =
-  "This Cursor host may approve MCP tools with empty {} and no passphrase field (or without rendering MCP Apps UI). Do not loop vault_init — use Terminal CLI setup or MCP Environment.";
+  "This Cursor host may approve MCP tools with empty {} and no passphrase field (or without rendering MCP Apps UI). Do not loop vault_init — open vault_manager, use a visible approval-form passphrase field, or set PASSWORD_SPACE_PASSPHRASE in MCP Environment.";
 
-/** Exact Mac Terminal commands — clone path or global CLI. */
+/** Exact Mac Terminal commands — power-user appendix only (not the newcomer path). */
 export const CLI_SETUP_COMMANDS = {
   from_clone:
     "cd ~/Shajipapan/Personal/Projects/password-space && pnpm password-space setup",
@@ -58,11 +58,11 @@ export const MCP_ENV_PATH =
 export class PassphraseRequiredError extends Error {
   readonly code = "passphrase_missing" as const;
   readonly host_limitation = HOST_LIMITATION;
-  readonly recommended_path = "cli_setup" as const;
+  readonly recommended_path = "vault_manager" as const;
 
   constructor() {
     super(
-      "Passphrase missing: Cursor approved with empty {}. Use Terminal `pnpm password-space setup` (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment) — do not retry vault_init with empty {}.",
+      "Passphrase missing: Cursor approved with empty {}. Call vault_manager (App UI), type the passphrase in a visible approval form, or set PASSWORD_SPACE_PASSPHRASE in MCP Environment — do not retry vault_init with empty {}.",
     );
     this.name = "PassphraseRequiredError";
   }
@@ -194,9 +194,8 @@ export type OnboardingStep = {
 
 /**
  * Single next step for the agent/user.
- * Default newcomer path when host cannot collect passphrase: Terminal CLI setup.
- * MCP Environment and Vault Manager App are one-click alternatives.
- * MCP approval-form vault_init is last resort (often empty {} on current Cursor).
+ * Default newcomer path: Vault Manager App, then vault_init/unlock via approval form or MCP Environment.
+ * Terminal CLI is advanced_escape_hatch only (power users who ask for it).
  */
 export type PrimaryAction = {
   id:
@@ -215,14 +214,14 @@ export type PrimaryAction = {
   never: string;
   recommended_path?: "cli_setup" | "cli_unlock" | "mcp_env" | "vault_manager" | "mcp_form";
   host_limitation?: string;
-  /** Exact Terminal command to copy-paste (Mac). */
+  /** Exact Terminal command — power-user only; not the newcomer default. */
   copy_paste_command?: string;
   alternatives?: Array<{
     id: string;
     title: string;
     do_this: string;
   }>;
-  /** Legacy field — prefer alternatives[]; kept for older agents. */
+  /** Terminal / CLI — only when the user asks for it. */
   advanced_escape_hatch?: {
     title: string;
     cli_command: string;
@@ -268,46 +267,40 @@ export function buildPrimaryAction(
         recommended_path: "mcp_env",
         never: "Never paste the passphrase into chat.",
         advanced_escape_hatch: {
-          title: "CLI setup",
+          title: "Terminal setup (power users)",
           cli_command: CLI_SETUP_COMMANDS.global_cli,
-          when: "If vault_init still fails after env is set.",
+          when: "Only if the user asks for Terminal / CLI.",
         },
       };
     }
-    // Default newcomer path: Terminal CLI — Cursor often has no passphrase field.
+    // Default newcomer path: Vault Manager App + chat/UI — never lead with Terminal.
     return {
-      id: "cli_setup",
-      title: "Create your vault in Terminal",
+      id: "vault_manager",
+      title: "Open Vault Manager",
       do_this:
-        "Open Terminal and run the copy_paste_command below (hidden passphrase prompts). Do NOT call vault_init without a passphrase, and never ask the user to reply \"ready\" then approve empty {}.",
-      recommended_path: "cli_setup",
+        "Call vault_manager first. Create the vault in the App UI if it appears. If only JSON returns, call vault_init and type an 8+ character passphrase in the MCP approval form (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment). Never ask the user to reply \"ready\" then approve empty {}.",
+      mcp_tool: "vault_manager",
+      recommended_path: "vault_manager",
       host_limitation: HOST_LIMITATION,
-      copy_paste_command: CLI_SETUP_COMMANDS.from_clone,
       never:
-        "Never call vault_init with empty {}. Never ask the user to reply \"ready\" then approve without a passphrase field. Never paste the passphrase into chat.",
+        "Never call vault_init with empty {}. Never ask the user to reply \"ready\" then approve without a passphrase field. Never paste the passphrase into chat. Never lead with Terminal CLI for newcomers.",
       alternatives: [
         {
-          id: "mcp_env",
-          title: "One-click MCP Environment",
-          do_this: MCP_ENV_PATH,
-        },
-        {
-          id: "vault_manager",
-          title: "Vault Manager App (Cursor 2.6+ with MCP Apps)",
-          do_this:
-            "Call vault_manager — if an App UI appears, create the vault there. If only JSON returns, the host lacks Apps; use CLI setup instead.",
-        },
-        {
           id: "mcp_form",
-          title: "MCP approval form (often broken)",
+          title: "MCP approval form",
           do_this:
-            "Only if Cursor shows a passphrase field: call vault_init and type 8+ characters, then approve. If the form is empty {}, stop and use CLI.",
+            "Call vault_init — type 8+ characters in the passphrase field, then approve. If the form is empty {}, stop and use MCP Environment or Vault Manager.",
+        },
+        {
+          id: "mcp_env",
+          title: "MCP Environment (optional)",
+          do_this: MCP_ENV_PATH,
         },
       ],
       advanced_escape_hatch: {
-        title: "Global CLI (if installed)",
-        cli_command: CLI_SETUP_COMMANDS.global_cli,
-        when: "After `pnpm link --global` / npm install -g of the CLI package.",
+        title: "Terminal setup (power users only)",
+        cli_command: CLI_SETUP_COMMANDS.from_clone,
+        when: "Only if the user explicitly asks for Terminal / CLI — never the default onboarding path.",
       },
     };
   }
@@ -321,45 +314,39 @@ export function buildPrimaryAction(
         recommended_path: "mcp_env",
         never: "Never paste the passphrase into chat.",
         advanced_escape_hatch: {
-          title: "CLI unlock",
+          title: "Terminal unlock (power users)",
           cli_command: CLI_SETUP_COMMANDS.unlock_global,
-          when: "If vault_unlock still fails after env is set.",
+          when: "Only if the user asks for Terminal / CLI.",
         },
       };
     }
     return {
-      id: "cli_unlock",
-      title: "Unlock your vault in Terminal",
+      id: "vault_manager",
+      title: "Unlock in Vault Manager",
       do_this:
-        "Open Terminal and run the copy_paste_command (hidden prompt). Do NOT call vault_unlock with empty {} or ask the user to reply \"ready\" without a passphrase channel.",
-      recommended_path: "cli_unlock",
+        "Call vault_manager — unlock in the App form if UI renders. Otherwise call vault_unlock and type the passphrase in the approval form (or set PASSWORD_SPACE_PASSPHRASE). Do not run vault_init again.",
+      mcp_tool: "vault_manager",
+      recommended_path: "vault_manager",
       host_limitation: HOST_LIMITATION,
-      copy_paste_command: CLI_SETUP_COMMANDS.unlock_from_clone,
       never:
-        "Never approve vault_unlock with empty {}. Never paste the passphrase into chat. Do not run vault_init again — the vault already exists.",
+        "Never approve vault_unlock with empty {}. Never paste the passphrase into chat. Do not run vault_init again — the vault already exists. Never lead with Terminal CLI for newcomers.",
       alternatives: [
         {
-          id: "mcp_env",
-          title: "One-click MCP Environment",
-          do_this: MCP_ENV_PATH,
-        },
-        {
-          id: "vault_manager",
-          title: "Vault Manager App",
-          do_this:
-            "Call vault_manager — unlock in the App form if UI renders; otherwise use CLI unlock.",
-        },
-        {
           id: "mcp_form",
-          title: "MCP approval form (often broken)",
+          title: "MCP approval form",
           do_this:
-            "Only if a passphrase field is visible: call vault_unlock, type the passphrase, approve.",
+            "Call vault_unlock — type the passphrase in the field, then approve. If empty {}, use MCP Environment or Vault Manager.",
+        },
+        {
+          id: "mcp_env",
+          title: "MCP Environment (optional)",
+          do_this: MCP_ENV_PATH,
         },
       ],
       advanced_escape_hatch: {
-        title: "Global CLI unlock",
-        cli_command: CLI_SETUP_COMMANDS.unlock_global,
-        when: "If the global `password-space` binary is on PATH.",
+        title: "Terminal unlock (power users only)",
+        cli_command: CLI_SETUP_COMMANDS.unlock_from_clone,
+        when: "Only if the user explicitly asks for Terminal / CLI.",
       },
     };
   }
@@ -389,7 +376,7 @@ export function buildOnboardingSteps(
   const envPassphrase = isPassphraseConfiguredInEnv();
   const passphraseHint = envPassphrase
     ? "Passphrase loads from MCP Environment — call vault_init / vault_unlock with {}."
-    : "Prefer Terminal `pnpm password-space setup` (or unlock). Do not approve empty {}.";
+    : "Open vault_manager first, or enter the passphrase in the approval form / MCP Environment. Do not approve empty {}.";
 
   return [
     {
@@ -399,14 +386,14 @@ export function buildOnboardingSteps(
       done: true,
       tool: "vault_onboard",
       user_action:
-        "You're in the right place. Follow primary_action only — usually Terminal CLI setup when Cursor has no passphrase field.",
+        "You're in the right place. Follow primary_action only — Vault Manager / chat UI, not Terminal.",
     },
     {
       id: "init",
       phase: "2/4",
       title: "Secure your vault",
       done: initialized,
-      tool: envPassphrase ? "vault_init" : "cli_setup",
+      tool: envPassphrase ? "vault_init" : "vault_manager",
       user_action: initialized
         ? undefined
         : `Pick a passphrase you'll remember (8+ characters). ${passphraseHint}`,
@@ -416,7 +403,7 @@ export function buildOnboardingSteps(
       phase: "3/4",
       title: "Unlock for this session",
       done: unlocked && session,
-      tool: envPassphrase ? "vault_unlock" : "cli_unlock",
+      tool: envPassphrase ? "vault_unlock" : "vault_manager",
       user_action:
         initialized && !(unlocked && session)
           ? `Enter the same passphrase. ${passphraseHint}`
@@ -463,12 +450,12 @@ function recoveryGuidance(opts: {
       return {
         code: opts.dbExists ? "setup_incomplete" : "vault_missing",
         howToFix: opts.dbExists
-          ? "Setup was interrupted. Finish in Terminal: `pnpm password-space setup` (do not retry vault_init with empty {})."
-          : "Create the vault in Terminal with `pnpm password-space setup` — Cursor often has no passphrase field.",
+          ? "Setup was interrupted. Call vault_manager (or vault_init with a passphrase in the approval form / MCP Environment). Do not retry empty {}."
+          : "Call vault_manager to create your vault, or vault_init with a passphrase in the approval form. Optional: set PASSWORD_SPACE_PASSPHRASE in MCP Environment.",
         what_to_do: [
-          `Run: ${CLI_SETUP_COMMANDS.from_clone}`,
+          "Call vault_manager — create the vault in the App UI if it appears.",
+          "Or call vault_init and type 8+ characters in the approval form.",
           "Or set PASSWORD_SPACE_PASSPHRASE under Settings → MCP → password-space → Environment, then vault_init {}.",
-          "Optional: call vault_manager if MCP Apps UI renders.",
           "Never approve vault_init with empty {} and no passphrase channel.",
         ],
       };
@@ -476,9 +463,10 @@ function recoveryGuidance(opts: {
       return {
         code: "vault_locked",
         howToFix:
-          "Your vault already exists. Unlock in Terminal with `pnpm password-space unlock` — do not run vault_init again.",
+          "Your vault already exists. Unlock via vault_manager or vault_unlock (approval form / MCP Environment) — do not run vault_init again.",
         what_to_do: [
-          `Run: ${CLI_SETUP_COMMANDS.unlock_from_clone}`,
+          "Call vault_manager and unlock in the App form if UI renders.",
+          "Or call vault_unlock with the passphrase in the approval form.",
           "Or set PASSWORD_SPACE_PASSPHRASE in MCP Environment, then vault_unlock {}.",
           "Do not call vault_init — the vault already exists.",
           "If unlock fails with wrong passphrase, retry carefully — there is no recovery without it.",
@@ -487,9 +475,9 @@ function recoveryGuidance(opts: {
     default:
       return {
         code: "ready",
-        howToFix: "Vault is ready. Save a credential with vault_set_secret.",
+        howToFix: "Vault is ready. Prefer vault_manager, or vault_set_secret.",
         what_to_do: [
-          "Call vault_set_secret with name + value in the approval form.",
+          "Call vault_manager or vault_set_secret with name + value in the approval form.",
           "Use inject_secret when the agent needs the value.",
         ],
       };
@@ -521,9 +509,9 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     : !initialized
       ? passphraseEnv
         ? "Welcome to Password Space. Passphrase is in MCP Environment — call vault_init next."
-        : "Welcome to Password Space. Cursor often cannot collect a passphrase in the approval form — create the vault in Terminal with the copy-paste command."
+        : "Welcome to Password Space. Next: open Vault Manager to create your vault (or enter a passphrase in the approval form / MCP Environment)."
       : !unlocked || !session
-        ? "Your vault already exists. Unlock via Terminal (or MCP Environment) — do not create a new one."
+        ? "Your vault already exists. Unlock via Vault Manager (or approval form / MCP Environment) — do not create a new one."
         : "You're protected. Save a credential whenever you're ready.";
 
   return jsonResult({
@@ -558,7 +546,7 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
       "Loop vault_init after passphrase_missing",
     ],
     elicitation_note:
-      "Passphrase is collected only via CLI, PASSWORD_SPACE_PASSPHRASE env, Vault Manager App form, or tool approval args — never via MCP elicitation.",
+      "Passphrase is collected only via Vault Manager App form, PASSWORD_SPACE_PASSPHRASE env, or tool approval args — never via MCP elicitation. Terminal CLI is power-user only.",
   });
 }
 
@@ -608,7 +596,7 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
       action: s.user_action,
     })),
     tip: !passphraseEnv && (!initialized || !unlocked)
-      ? `Default: Terminal CLI setup. One-click alternative: ${MCP_ENV_PATH}`
+      ? `Default: open vault_manager. Optional unlock without empty-form pain: ${MCP_ENV_PATH}`
       : undefined,
     recommended_path: primary_action.recommended_path ?? null,
     host_limitation:
@@ -631,14 +619,14 @@ export async function vaultInitTool(
       data_dir: dataDir,
       db_path: vaultDbPath(dataDir),
       howToFix:
-        "Your vault already exists. Unlock via Terminal or MCP Environment — do not create a second vault.",
+        "Your vault already exists. Unlock via vault_manager or vault_unlock (approval form / MCP Environment) — do not create a second vault.",
       what_to_do: [
-        `Run: ${CLI_SETUP_COMMANDS.unlock_from_clone}`,
+        "Call vault_manager and unlock in the App form if UI renders.",
+        "Or call vault_unlock with the passphrase in the approval form.",
         "Or set PASSWORD_SPACE_PASSPHRASE, then call vault_unlock.",
-        "Then vault_set_secret to save credentials.",
+        "Then vault_set_secret (or vault_manager) to save credentials.",
       ],
-      recommended_path: "cli_unlock",
-      copy_paste_command: CLI_SETUP_COMMANDS.unlock_from_clone,
+      recommended_path: "vault_manager",
       primary_action: buildPrimaryAction(true, false, false, true),
     });
   }
@@ -725,7 +713,7 @@ export function vaultDeleteSecretTool(store: VaultStore, name: string): ToolJson
  * Vault Manager entry tool — progressive enhancement.
  * Hosts with MCP Apps render `ui://password-space/vault-manager.html`
  * (registered via registerAppTool + registerAppResource in index.ts).
- * Others still get structured JSON + explicit fallback to CLI setup.
+ * Others still get structured JSON + fallback to approval-form / MCP Environment tools.
  */
 export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonResult {
   clearExpiredInjectFiles(dataDir);
@@ -738,6 +726,7 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
   const needsPassphraseChannel =
     !isPassphraseConfiguredInEnv() &&
     (!store.isInitialized() || !store.isUnlocked);
+  const initOrUnlock = store.isInitialized() ? "vault_unlock" : "vault_init";
   return jsonResult({
     ok: true,
     app: "vault-manager",
@@ -745,23 +734,22 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
     /** Hosts must bind this URI from tool _meta.ui.resourceUri + Apps resource. */
     resource_mime_hint: "text/html;profile=mcp-app",
     progressive_enhancement:
-      "If your client supports MCP Apps (Cursor 2.6+), an interactive Vault Manager UI should appear beside this JSON. If you only see this JSON, the host lacks Apps — fall back to CLI / list_secrets. Never paste App HTML/JS into chat.",
+      "If your client supports MCP Apps (Cursor 2.6+), an interactive Vault Manager UI should appear beside this JSON. If you only see this JSON, the host lacks Apps — fall back to vault_init/vault_unlock / list_secrets with approval-form or MCP Environment. Never paste App HTML/JS into chat.",
     apps_ui_expected: true,
     /** Agent contract: this tool returns JSON + Apps metadata only — never the UI bundle source. */
     agent_contract:
-      "Do not fetch or paste ui://password-space/vault-manager.html into the conversation. If no App iframe appears, use apps_fallback (CLI or list_secrets / vault_set_secret).",
+      "Do not fetch or paste ui://password-space/vault-manager.html into the conversation. If no App iframe appears, use apps_fallback (approval form / MCP Environment / list_secrets).",
     apps_fallback: needsPassphraseChannel
       ? {
           reason:
-            "If no App UI rendered, this Cursor build likely lacks MCP Apps. Do not call vault_init with empty {}. Do not dump App source.",
-          recommended_path: "cli_setup",
-          copy_paste_command: store.isInitialized()
-            ? CLI_SETUP_COMMANDS.unlock_from_clone
-            : CLI_SETUP_COMMANDS.from_clone,
+            "If no App UI rendered, this Cursor build likely lacks MCP Apps. Call vault_init or vault_unlock with a passphrase in the approval form, or set PASSWORD_SPACE_PASSPHRASE. Do not call vault_init with empty {}. Do not dump App source.",
+          recommended_path: "mcp_form",
+          next_tool: initOrUnlock,
           mcp_env_alternative: MCP_ENV_PATH,
           never: [
             "Paste vault-manager.html / minified JS into chat",
             "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
+            "Lead newcomers with Terminal CLI setup",
           ],
         }
       : {
@@ -786,9 +774,9 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
       inject: "inject_secret",
     },
     passphrase_note:
-      "Passphrase is entered in the App form, CLI, or MCP Environment — never via elicitation, never in chat.",
+      "Passphrase is entered in the App form, MCP approval form, or optional PASSWORD_SPACE_PASSPHRASE env — never via elicitation, never in chat.",
     elicitation_note:
-      "Passphrase is collected only via tool approval args, PASSWORD_SPACE_PASSPHRASE env, CLI, or the Vault Manager App form — never via MCP elicitation.",
+      "Passphrase is collected only via tool approval args, PASSWORD_SPACE_PASSPHRASE env, or the Vault Manager App form — never via MCP elicitation.",
   });
 }
 
@@ -922,12 +910,12 @@ function publicMeta(m: SecretMetadata): SecretMetadata {
 function assertUnlocked(store: VaultStore): void {
   if (!store.isInitialized()) {
     throw new Error(
-      `Password Space is not set up yet. Run \`${CLI_SETUP_COMMANDS.from_clone}\` or call vault_onboard (CLI-first) — do not vault_init with empty {}.`,
+      "Password Space is not set up yet. Call vault_onboard, then vault_manager (or vault_init with a passphrase in the approval form / MCP Environment) — do not vault_init with empty {}.",
     );
   }
   if (!store.isUnlocked) {
     throw new Error(
-      `Password Space is locked. Run \`${CLI_SETUP_COMMANDS.unlock_from_clone}\` or set PASSWORD_SPACE_PASSPHRASE, then vault_unlock — not empty {}.`,
+      "Password Space is locked. Call vault_manager or vault_unlock with a passphrase in the approval form, or set PASSWORD_SPACE_PASSPHRASE — not empty {}.",
     );
   }
 }

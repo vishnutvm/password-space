@@ -69,22 +69,24 @@ Day-1 setup does **not** require `git clone` or `pnpm`.
 5. Optional custom vault path: set a **real** `PASSWORD_SPACE_HOME` (absolute path) in the environment or a hand-written MCP `env` block. Leave it unset to use `~/.password-space`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default.
 6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`** and walk you through the checklist.
 
-7. **Default:** follow `primary_action` — usually Terminal CLI setup (`pnpm password-space setup` / `password-space setup`). Cursor often has **no passphrase field** and approving empty `{}` fails with `passphrase_missing`.
+7. **Default:** follow `primary_action` — open **Vault Manager** (`vault_manager`), then create/unlock in the App UI or type the passphrase in a visible MCP approval form. Approving empty `{}` fails with `passphrase_missing`.
 
-8. **One-click alternative:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}`.
+8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}` — skips empty-form pain.
 
 ```text
-vault_onboard → cli_setup (Terminal) → vault_status → vault_set_secret → inject_secret
-# or: MCP Environment PASSWORD_SPACE_PASSPHRASE → vault_init {} → vault_unlock {}
+vault_onboard → vault_manager → vault_init / vault_unlock (App or approval form) → vault_set_secret → inject_secret
+# optional: MCP Environment PASSWORD_SPACE_PASSPHRASE → vault_init {} → vault_unlock {}
 ```
 
-Pass **passphrase** and **secret values** only via CLI, MCP Environment, Vault Manager App, or a visible approval-form field — **never** in chat.
+Pass **passphrase** and **secret values** only via Vault Manager App, MCP Environment, or a visible approval-form field — **never** in chat. Terminal CLI is a power-user appendix, not onboarding.
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
 Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/`.
 
-## Quickstart (CLI — optional power-user)
+## CLI appendix (power users only — not onboarding)
+
+Day-1 setup does **not** need these commands. Prefer `/setup-password-space` → Vault Manager.
 
 ```bash
 git clone https://github.com/vishnutvm/password-space.git
