@@ -1,43 +1,24 @@
 ---
 name: password-space
-description: Install · One-time Setup · Start Using. Follow vault_onboard primary_action — default is Terminal CLI setup when Cursor cannot collect a passphrase; never ask users to edit mcp.json.
+description: Install · One-time Setup · Start Using. Follow vault_onboard primary_action only — MCP App / approval-form path for newcomers; never ask users to edit mcp.json.
 ---
 
 # Password Space
 
-Encrypted vault on the user's Mac. **One obvious next step** — follow `primary_action` only.
+Encrypted vault on the user's Mac. **One obvious next step** — no competing paths, no MCP/CLI jargon.
 
-## Newcomer path (default)
+## Newcomer path (only path to present)
 
 1. User runs **`/setup-password-space`** (or asks to set up Password Space).
 2. Call **`vault_onboard`**.
-3. Follow **`primary_action.do_this` exactly**.
-4. When `recommended_path` is **`cli_setup`** (usual case without MCP Environment):
-   - Show **`copy_paste_command`** (Terminal).
-   - Tell the user to run it and enter a passphrase at the hidden prompts.
-   - **Do not** call `vault_init` afterward until they finish CLI setup (then `vault_status`).
-5. Passphrase goes in **Terminal CLI**, **MCP Environment**, or **Vault Manager App** — **never** in chat, **never** via elicitation.
-
-### Never do this (causes empty `{}` / `passphrase_missing` loop)
-
-- Ask the user to reply **"ready"** then call **`vault_init`** / **`vault_unlock`** without a passphrase channel
-- Approve **`vault_init`** / **`vault_unlock`** with empty **`{}`** when Cursor shows no passphrase field
-- Retry `vault_init` after `passphrase_missing` — switch to CLI or MCP Environment instead
-
-### One-click alternative (no Terminal)
-
-**Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (8+ chars), then call `vault_init` / `vault_unlock` with `{}`.
-
-### Vault Manager App
-
-Call **`vault_manager`** only as an alternative. If an App UI iframe appears, use it. If only JSON returns (`apps_fallback`), the host lacks MCP Apps — use CLI / `list_secrets` / `vault_set_secret`.
-
-**Never** fetch or paste `ui://password-space/vault-manager.html` (or any App HTML/JS / zod dump) into the conversation. The tool already returns structured JSON + Apps metadata; the host renders the resource — agents must not dump the resource body.
+3. Follow **`primary_action.do_this` exactly** — that is the **only** next step.
+4. Default: call **`vault_manager`** first (Vault Manager App). Create / unlock there when the UI appears.
+5. If only JSON returns (no App UI): call **`vault_init`** / **`vault_unlock`** and put the passphrase in the **MCP approval form** (or MCP Environment) — **never** in chat, **never** via elicitation.
 
 ## After vault exists
 
-- **`vault_manager`** — interactive UI when Apps render; else tools / CLI
-- **`vault_set_secret`** — approval form only (or App)
+- **`vault_manager`** — interactive Vault Manager (MCP Apps); progressive JSON fallback
+- **`vault_set_secret`** — approval form only
 - **`vault_delete_secret`** / **`vault_change_passphrase`** when needed
 - **`inject_secret`** — preferred for agents
 - **`vault_lock`** when done
@@ -46,8 +27,16 @@ Call **`vault_manager`** only as an alternative. If an App UI iframe appears, us
 
 - Passphrase or secret values in chat
 - Ask the user to edit **`mcp.json`** or explain MCP
+- Offer CLI and slash setup as equal choices
+- Lead with Terminal / `pnpm password-space setup` for newcomers
+- Approve **`vault_init`** / **`vault_unlock`** with empty `{}`
 - Call **`vault_init`** again when `setup_state` is `needs_unlock` / vault already exists
-- Lead with MCP approval-form `vault_init` when `primary_action.id` is `cli_setup`
 - Dump Vault Manager App HTML/JS / MCP resource bodies into chat
 
-Safe line: *"Next step: open Terminal and paste this command to create your vault. I won't ask for your passphrase in chat."*
+## Advanced escape hatch (only if user asks for Terminal)
+
+`primary_action.advanced_escape_hatch` may mention `password-space setup` / `unlock`. Do **not** lead with it for newcomers.
+
+Optional env (avoids empty-form pain): **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`.
+
+Safe line: *"Next step: I'll open Vault Manager — create your vault there (or type your passphrase in the approval form when Cursor asks). I won't ask for it in chat."*
