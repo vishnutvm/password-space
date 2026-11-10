@@ -29,15 +29,18 @@ SDK **`@modelcontextprotocol/sdk` ^1.32** supports:
 2. Optional: MCP Environment `PASSWORD_SPACE_PASSPHRASE`
 3. Advanced: CLI `password-space setup`
 
-## Deferred — MCP Apps spike
+## MCP Apps — Vault Manager (shipped)
 
-A minimal Welcome App (status + “next step” checklist, **no** passphrase fields) is promising once:
+Pinned **`@modelcontextprotocol/ext-apps@^1.7.5`** (SDK 1.x line) and Cursor host support for MCP Apps (2.6+).
 
-1. `@modelcontextprotocol/ext-apps` is pinned and bundled into the plugin MCP
-2. Cursor host rendering of `ui://` / `_meta.ui.resourceUri` is verified on macOS
-3. Fallback text path remains identical when Apps are unsupported
+| Piece | Behavior |
+| --- | --- |
+| Tool | `vault_manager` via `registerAppTool` + `ui://password-space/vault-manager.html` |
+| UI | List / add / update / remove credentials, lock / unlock, change passphrase |
+| Passphrase | App form → `callServerTool` args (**not** elicitation) |
+| Progressive enhancement | Same tool returns structured JSON when Apps UI is unavailable |
 
-Until then, document this file as the Apps spike backlog — do not block Install→Setup→Use on Apps.
+Install→Setup→Use is **not** blocked on Apps — slash + `vault_onboard` remains the newcomer path; Vault Manager is the premium daily-use surface.
 
 ## Acceptance mapping
 

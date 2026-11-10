@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import { stdin as input, stdout as output, exit } from "node:process";
 import {
   VaultError,
+  changeVaultPassphrase,
   defaultDataDir,
   hasValidSession,
   lockVaultSession,
@@ -115,6 +116,7 @@ Commands:
   unlock               Unlock vault for this machine session
   lock                 Clear unlock session
   status               Show vault / lock status
+  change-passphrase    Re-wrap vault under a new passphrase
   set <name>           Store or update a secret (prompts for value)
   get <name>           Print secret value (human only — not for agents)
   list                 List secret names / metadata (no values)
@@ -280,6 +282,19 @@ async function main(): Promise<void> {
       case "lock": {
         lockVaultSession({ dataDir });
         console.log("Locked. Unlock session cleared.");
+        break;
+      }
+
+      case "change-passphrase": {
+        const current = await getPassphrase(args.flags, "Current passphrase: ");
+        const next = await promptNewPassphrase({});
+        const ttlHours = Number(args.flags.ttl ?? 8);
+        const { expiresAt } = await changeVaultPassphrase(current, next, {
+          dataDir,
+          ttlMs: ttlHours * 60 * 60 * 1000,
+        });
+        console.log("Passphrase updated.");
+        console.log(`Unlocked until ${expiresAt}`);
         break;
       }
 
