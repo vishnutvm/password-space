@@ -13,6 +13,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { defaultDataDir, openVault } from "@password-space/vault";
 import {
+  NodeVersionError,
   PassphraseRequiredError,
   getSecretMetadataTool,
   injectSecretTool,
@@ -250,24 +251,40 @@ function errorResult(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   const payload: Record<string, unknown> = { ok: false, error: message };
 
-  if (err instanceof PassphraseRequiredError) {
+  if (err instanceof NodeVersionError) {
+    payload.code = err.code;
+    payload.found = err.found;
+    payload.required = err.required;
+    payload.howToFix =
+      "Install Node.js 20+ from https://nodejs.org, then reload Cursor. Do not edit mcp.json.";
+    payload.what_to_do = [
+      "Run `node -v` in Terminal — it must be v20 or newer.",
+      "Reload the Cursor window.",
+      "Run /setup-password-space again.",
+    ];
+  } else if (err instanceof PassphraseRequiredError) {
     payload.code = err.code;
     payload.howToFix =
-      "Open the approval form again, enter your vault passphrase, then approve.";
+      "Open the approval form again, enter your vault passphrase, then approve. Do not approve with empty {}.";
     payload.what_happened = "The passphrase field was empty.";
     payload.what_to_do = [
       "Type your passphrase in the approval form — don't approve with empty fields.",
       "Optional: Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE.",
-      "Run vault_onboard for the full guided checklist.",
+      "Run /setup-password-space (vault_onboard) for the single guided path.",
+      "Advanced escape hatch only: `password-space setup` in Terminal.",
     ];
   } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
     payload.code = "passphrase_too_short";
     payload.howToFix = "Choose a passphrase with at least 8 characters, then try again.";
     payload.what_to_do = ["Use 8 or more characters for your vault passphrase."];
+  } else if (/Wrong passphrase/i.test(message)) {
+    payload.code = "wrong_passphrase";
+    payload.howToFix =
+      "That passphrase did not unlock the vault. Retry vault_unlock carefully — there is no recovery without the correct passphrase.";
   } else if (/locked/i.test(message)) {
     payload.howToFix = "Run vault_unlock and enter your passphrase in the approval form.";
   } else if (/not set up|not initialized/i.test(message)) {
-    payload.howToFix = "Run vault_onboard, then vault_init to create your vault.";
+    payload.howToFix = "Run /setup-password-space, then approve vault_init with your passphrase in the form.";
   }
 
   return {

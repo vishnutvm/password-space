@@ -1,6 +1,6 @@
 # Password Space for everyone
 
-**Install · Create vault · Use secrets** — no secrets in chat.
+**Install · One-time Setup · Start Using** — no secrets in chat, no `mcp.json` edits.
 
 Encrypted vault on your Mac. Your agent uses tokens without pasting them into the conversation.
 
@@ -23,27 +23,17 @@ Encrypted vault on your Mac. Your agent uses tokens without pasting them into th
 3. Install **password-space**
 4. **Reload Window** (Cmd+Shift+P → *Developer: Reload Window*)
 
-### 2. Create your vault (pick **one** way)
+Requires **Node.js 20+** on your Mac (`node -v`). The plugin MCP uses Node's built-in SQLite.
 
-**Recommended — Terminal (clearest):**
+### 2. Create your vault (one path)
 
-After cloning the repo (or any install with the CLI):
-
-```bash
-cd path/to/password-space
-pnpm install && pnpm build
-pnpm password-space setup
-```
-
-One screen, hidden passphrase, create + unlock. No `{}` approval confusion.
-
-**Or — stay in Cursor:**
-
-1. Chat: **`/setup-password-space`**
-2. Agent calls **`vault_onboard`** → follow **`primary_action.do_this`**
+1. In chat: **`/setup-password-space`**
+2. Agent calls **`vault_onboard`** → follow the single **`primary_action`**
 3. Approve **`vault_init`** / **`vault_unlock`** and **type your passphrase in the form** — never an empty approval
 
 Optional: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never in chat).
+
+You do **not** edit `mcp.json`. You do **not** need to understand MCP.
 
 ### 3. Use
 
@@ -51,17 +41,31 @@ Optional: **Settings → MCP → password-space → Environment** → `PASSWORD_
 - Agent access: **`inject_secret`**
 - Done for the day: **`vault_lock`**
 
+## Advanced escape hatch (optional)
+
+If MCP approval forms keep failing empty, power users with the repo CLI can run:
+
+```bash
+pnpm password-space setup
+```
+
+This is **not** the newcomer path — prefer `/setup-password-space` first.
+
 ## Troubleshooting
 
 | Problem | Fix |
 | --- | --- |
-| `vault_init` failed | You approved with `{}` — run **`password-space setup`** in Terminal or retry with passphrase in the form |
-| "Vault locked" | **`password-space unlock`** or **`vault_unlock`** with passphrase in form |
+| Node too old / MCP won't start | Install Node **20+**, reload Cursor, run `/setup-password-space` again |
+| `vault_init` failed / empty `{}` | Retry and **type the passphrase in the form** — do not approve blank |
+| "Vault already initialized" | Call **`vault_unlock`** instead — your vault already exists |
+| "Vault locked" after restart | **`vault_unlock`** with passphrase in form (session expired; vault is fine) |
+| Mid-setup interruption | Run **`/setup-password-space`** again — `vault_onboard` resumes from current state |
 | Reinstall plugin | [FRESH_INSTALL_VERIFY.md](./FRESH_INSTALL_VERIFY.md) |
 
 ## Trust
 
 - Data stays in `~/.password-space` on your device
 - Uninstalling the plugin does **not** delete your vault unless you remove that folder
+- Passphrase is never collected via MCP elicitation (sensitive data stays in tool approval / env / CLI)
 
-More: [onboarding.md](./onboarding.md) · [SECURITY.md](../SECURITY.md)
+More: [zero-friction-v1.md](./zero-friction-v1.md) · [onboarding.md](./onboarding.md) · [SECURITY.md](../SECURITY.md)

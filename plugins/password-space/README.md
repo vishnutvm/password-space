@@ -14,9 +14,11 @@
 
 ## After install
 
-1. In chat: **`/setup-password-space`** or *"Set up Password Space."*
-2. When Cursor shows **Run tool**, enter your **passphrase** in the form (8+ characters).
+1. In chat: **`/setup-password-space`** (one path — Install → Setup → Use).
+2. When Cursor shows **Run tool**, enter your **passphrase** in the form (8+ characters). Never approve empty `{}`.
 3. Optional: **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never in chat).
+
+You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
 **Trust:** Local encryption. Passphrases and tokens stay out of the conversation.
 
@@ -26,12 +28,12 @@ Default vault folder: `~/.password-space`. Override with `PASSWORD_SPACE_HOME` i
 
 | Tool | Returns secrets? |
 | --- | --- |
-| `vault_onboard` | No — start here |
+| `vault_onboard` | No — start here (`primary_action` only) |
 | `vault_status` | No |
 | `vault_init` / `vault_unlock` | No |
 | `vault_set_secret` | No (metadata only) |
 | `inject_secret` | No — **preferred** for agents |
 
-Power users: [root README](../../README.md) · CLI · manual MCP config.
+More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [zero-friction-v1.md](../../docs/zero-friction-v1.md). Power users: [root README](../../README.md) · CLI.
 
 MIT
