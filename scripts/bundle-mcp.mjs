@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inlineVaultManagerHtml } from "./vault-manager-html.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "plugins/password-space/dist");
@@ -53,16 +54,16 @@ if (!uiJs) {
   throw new Error("Failed to bundle vault-manager UI");
 }
 
-let html = readFileSync(htmlTemplatePath, "utf8");
-html = html.replace(
-  `<script type="module" src="./vault-manager-ui.js"></script>`,
-  `<script type="module">\n${uiJs}\n</script>`,
-);
+const template = readFileSync(htmlTemplatePath, "utf8");
+const html = inlineVaultManagerHtml(template, uiJs);
 writeFileSync(appHtmlOut, html);
-console.log(`bundled → ${appHtmlOut}`);
+console.log(`bundled → ${appHtmlOut} (${html.length} bytes)`);
 
 // Ensure ext-apps is installed (peer of MCP Apps helpers used at runtime via bundled server).
-const extAppsPkg = join(root, "packages/mcp-server/node_modules/@modelcontextprotocol/ext-apps/package.json");
+const extAppsPkg = join(
+  root,
+  "packages/mcp-server/node_modules/@modelcontextprotocol/ext-apps/package.json",
+);
 if (!existsSync(extAppsPkg)) {
   console.warn(
     "warn: @modelcontextprotocol/ext-apps not found under packages/mcp-server — run pnpm install",

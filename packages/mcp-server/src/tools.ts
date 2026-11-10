@@ -745,21 +745,33 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
     /** Hosts must bind this URI from tool _meta.ui.resourceUri + Apps resource. */
     resource_mime_hint: "text/html;profile=mcp-app",
     progressive_enhancement:
-      "If your client supports MCP Apps (Cursor 2.6+), an interactive Vault Manager UI should appear beside this JSON. If you only see this JSON, the host lacks Apps — fall back to CLI.",
+      "If your client supports MCP Apps (Cursor 2.6+), an interactive Vault Manager UI should appear beside this JSON. If you only see this JSON, the host lacks Apps — fall back to CLI / list_secrets. Never paste App HTML/JS into chat.",
     apps_ui_expected: true,
+    /** Agent contract: this tool returns JSON + Apps metadata only — never the UI bundle source. */
+    agent_contract:
+      "Do not fetch or paste ui://password-space/vault-manager.html into the conversation. If no App iframe appears, use apps_fallback (CLI or list_secrets / vault_set_secret).",
     apps_fallback: needsPassphraseChannel
       ? {
           reason:
-            "If no App UI rendered, this Cursor build likely lacks MCP Apps. Do not call vault_init with empty {}.",
+            "If no App UI rendered, this Cursor build likely lacks MCP Apps. Do not call vault_init with empty {}. Do not dump App source.",
           recommended_path: "cli_setup",
           copy_paste_command: store.isInitialized()
             ? CLI_SETUP_COMMANDS.unlock_from_clone
             : CLI_SETUP_COMMANDS.from_clone,
           mcp_env_alternative: MCP_ENV_PATH,
+          never: [
+            "Paste vault-manager.html / minified JS into chat",
+            "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
+          ],
         }
       : {
-          reason: "App UI unavailable — use list_secrets / vault_set_secret tools from capabilities.",
+          reason:
+            "App UI unavailable — use list_secrets / vault_set_secret tools from capabilities. Never dump UI resource body into chat.",
           recommended_path: "mcp_tools",
+          never: [
+            "Paste vault-manager.html / minified JS into chat",
+            "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
+          ],
         },
     host_limitation: needsPassphraseChannel ? HOST_LIMITATION : undefined,
     status: parsed,
