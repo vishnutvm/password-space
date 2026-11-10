@@ -29997,16 +29997,26 @@ function vaultManagerTool(store, dataDir2) {
     ui_resource: "ui://password-space/vault-manager.html",
     /** Hosts must bind this URI from tool _meta.ui.resourceUri + Apps resource. */
     resource_mime_hint: "text/html;profile=mcp-app",
-    progressive_enhancement: "If your client supports MCP Apps (Cursor 2.6+), an interactive Vault Manager UI should appear beside this JSON. If you only see this JSON, the host lacks Apps \u2014 fall back to CLI.",
+    progressive_enhancement: "If your client supports MCP Apps (Cursor 2.6+), an interactive Vault Manager UI should appear beside this JSON. If you only see this JSON, the host lacks Apps \u2014 fall back to CLI / list_secrets. Never paste App HTML/JS into chat.",
     apps_ui_expected: true,
+    /** Agent contract: this tool returns JSON + Apps metadata only — never the UI bundle source. */
+    agent_contract: "Do not fetch or paste ui://password-space/vault-manager.html into the conversation. If no App iframe appears, use apps_fallback (CLI or list_secrets / vault_set_secret).",
     apps_fallback: needsPassphraseChannel ? {
-      reason: "If no App UI rendered, this Cursor build likely lacks MCP Apps. Do not call vault_init with empty {}.",
+      reason: "If no App UI rendered, this Cursor build likely lacks MCP Apps. Do not call vault_init with empty {}. Do not dump App source.",
       recommended_path: "cli_setup",
       copy_paste_command: store.isInitialized() ? CLI_SETUP_COMMANDS.unlock_from_clone : CLI_SETUP_COMMANDS.from_clone,
-      mcp_env_alternative: MCP_ENV_PATH
+      mcp_env_alternative: MCP_ENV_PATH,
+      never: [
+        "Paste vault-manager.html / minified JS into chat",
+        "FetchMcpResource ui://password-space/vault-manager.html into the transcript"
+      ]
     } : {
-      reason: "App UI unavailable \u2014 use list_secrets / vault_set_secret tools from capabilities.",
-      recommended_path: "mcp_tools"
+      reason: "App UI unavailable \u2014 use list_secrets / vault_set_secret tools from capabilities. Never dump UI resource body into chat.",
+      recommended_path: "mcp_tools",
+      never: [
+        "Paste vault-manager.html / minified JS into chat",
+        "FetchMcpResource ui://password-space/vault-manager.html into the transcript"
+      ]
     },
     host_limitation: needsPassphraseChannel ? HOST_LIMITATION : void 0,
     status: parsed,
@@ -30136,17 +30146,28 @@ function assertUnlocked(store) {
 
 // packages/mcp-server/src/index.ts
 var VAULT_MANAGER_UI = "ui://password-space/vault-manager.html";
+var FALLBACK_VAULT_MANAGER_HTML = `<!DOCTYPE html><html><body><p>Password Space Vault Manager UI is not bundled. Use vault_status / list_secrets / CLI \u2014 do not paste App source into chat.</p></body></html>`;
+function isBundledVaultManagerHtml(html) {
+  if (!html.trimStart().startsWith("<!DOCTYPE html>")) return false;
+  const opens = html.match(/<script\b/gi) ?? [];
+  const closes = html.match(/<\/script>/gi) ?? [];
+  if (opens.length !== 1 || closes.length !== 1) return false;
+  if (html.includes('src="./vault-manager-ui.js"')) return false;
+  return true;
+}
 function loadVaultManagerHtml() {
   const here = dirname4(fileURLToPath(import.meta.url));
   const candidates = [
     join4(here, "vault-manager.html"),
-    join4(here, "../app/vault-manager.html"),
-    join4(here, "../../plugins/password-space/dist/vault-manager.html")
+    join4(here, "../../plugins/password-space/dist/vault-manager.html"),
+    join4(here, "../app/vault-manager.html")
   ];
   for (const path of candidates) {
-    if (existsSync6(path)) return readFileSync4(path, "utf8");
+    if (!existsSync6(path)) continue;
+    const html = readFileSync4(path, "utf8");
+    if (isBundledVaultManagerHtml(html)) return html;
   }
-  return `<!DOCTYPE html><html><body><p>Password Space Vault Manager UI is not bundled. Use vault_status / list_secrets tools instead.</p></body></html>`;
+  return FALLBACK_VAULT_MANAGER_HTML;
 }
 var dataDir = defaultDataDir();
 function withStore(fn) {

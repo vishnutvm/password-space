@@ -42,18 +42,33 @@ import {
 } from "./tools.js";
 
 const VAULT_MANAGER_UI = "ui://password-space/vault-manager.html";
+const FALLBACK_VAULT_MANAGER_HTML =
+  `<!DOCTYPE html><html><body><p>Password Space Vault Manager UI is not bundled. Use vault_status / list_secrets / CLI — do not paste App source into chat.</p></body></html>`;
+
+function isBundledVaultManagerHtml(html: string): boolean {
+  if (!html.trimStart().startsWith("<!DOCTYPE html>")) return false;
+  const opens = html.match(/<script\b/gi) ?? [];
+  const closes = html.match(/<\/script>/gi) ?? [];
+  // Reject unbundled template (external src) and $&-corrupted multi-script dumps.
+  if (opens.length !== 1 || closes.length !== 1) return false;
+  if (html.includes('src="./vault-manager-ui.js"')) return false;
+  return true;
+}
 
 function loadVaultManagerHtml(): string {
   const here = dirname(fileURLToPath(import.meta.url));
+  // Prefer the plugin dist single-file App next to the bundled server.
   const candidates = [
     join(here, "vault-manager.html"),
-    join(here, "../app/vault-manager.html"),
     join(here, "../../plugins/password-space/dist/vault-manager.html"),
+    join(here, "../app/vault-manager.html"),
   ];
   for (const path of candidates) {
-    if (existsSync(path)) return readFileSync(path, "utf8");
+    if (!existsSync(path)) continue;
+    const html = readFileSync(path, "utf8");
+    if (isBundledVaultManagerHtml(html)) return html;
   }
-  return `<!DOCTYPE html><html><body><p>Password Space Vault Manager UI is not bundled. Use vault_status / list_secrets tools instead.</p></body></html>`;
+  return FALLBACK_VAULT_MANAGER_HTML;
 }
 
 // defaultDataDir ignores empty / unresolved `${PASSWORD_SPACE_HOME}` placeholders
