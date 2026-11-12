@@ -105,11 +105,12 @@ function shellQuote(path: string): string {
  * `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" …`.
  */
 export function bundledCliCommand(
-  subcommand: "setup" | "unlock" | "set" | string,
+  subcommand: "setup" | "unlock" | "set" | string = "",
 ): string {
   const abs = resolveBundledCliPath();
-  if (abs) return `node ${shellQuote(abs)} ${subcommand}`;
-  return `${BUNDLED_CLI_NODE} ${subcommand}`;
+  const base = abs ? `node ${shellQuote(abs)}` : BUNDLED_CLI_NODE;
+  const sub = subcommand.trim();
+  return sub ? `${base} ${sub}` : base;
 }
 
 export const MCP_ENV_PATH =
@@ -254,8 +255,8 @@ export type OnboardingStep = {
 
 /**
  * Single next step for the agent/user.
- * Default path: Terminal CLI for create / unlock / add (hidden passphrase + secret prompts).
- * MCP Environment and Vault Manager App are optional alternatives (status / power users).
+ * Default path: interactive Terminal CLI for create / unlock / add / remove / lock.
+ * Optional: MCP Environment passphrase for scripts. Do not guide users to App forms.
  */
 export type PrimaryAction = {
   id:
@@ -350,18 +351,12 @@ export function buildPrimaryAction(
       host_limitation: HOST_LIMITATION,
       copy_paste_command: bundledCliCommand("setup"),
       never:
-        "Never call vault_init with empty {}. Never ask the user to reply \"ready\" then approve without a passphrase field. Never paste the passphrase into chat. Never collect passphrase or secret values in Vault Manager App forms or MCP approval forms when Terminal is available.",
+        "Never call vault_init with empty {}. Never ask the user to reply \"ready\" then approve without a passphrase field. Never paste the passphrase into chat. Never collect passphrase or secret values in App forms or MCP approval forms when Terminal is available.",
       alternatives: [
         {
           id: "mcp_env",
           title: "One-click MCP Environment",
           do_this: MCP_ENV_PATH,
-        },
-        {
-          id: "vault_manager",
-          title: "Vault Manager (optional status UI)",
-          do_this:
-            "Call vault_manager only for status when Apps render. Prefer Terminal for create/unlock/add — if only JSON returns, use CLI setup.",
         },
       ],
       advanced_escape_hatch: {
@@ -391,7 +386,7 @@ export function buildPrimaryAction(
       id: "cli_unlock",
       title: "Unlock your vault in Terminal",
       do_this:
-        "Open Terminal and run the copy_paste_command (hidden prompt). No clone needed. Do NOT call vault_unlock with empty {} or ask the user to reply \"ready\" without a passphrase channel.",
+        "Open Terminal and run the copy_paste_command (hidden prompt + session duration: 1 day / 1 week / until lock). No clone needed. Do NOT call vault_unlock with empty {} or ask the user to reply \"ready\" without a passphrase channel.",
       recommended_path: "cli_unlock",
       host_limitation: HOST_LIMITATION,
       copy_paste_command: bundledCliCommand("unlock"),
@@ -402,12 +397,6 @@ export function buildPrimaryAction(
           id: "mcp_env",
           title: "One-click MCP Environment",
           do_this: MCP_ENV_PATH,
-        },
-        {
-          id: "vault_manager",
-          title: "Vault Manager (optional status UI)",
-          do_this:
-            "Call vault_manager for status if Apps render; otherwise use Terminal unlock.",
         },
       ],
       advanced_escape_hatch: {
@@ -421,20 +410,20 @@ export function buildPrimaryAction(
     id: "cli_set",
     title: "Add a credential in Terminal",
     do_this:
-      "Open Terminal and run the copy_paste_command. Type the secret name, then the value at the hidden prompt. Never paste name/value in chat or MCP App forms.",
+      "Open Terminal and run the copy_paste_command (or bare cli.js for the interactive menu). Type the secret name, then the value at the hidden prompt. Never paste name/value in chat.",
     recommended_path: "cli_set",
     copy_paste_command: bundledCliCommand("set"),
     never: "Never paste API keys or passwords into chat.",
     alternatives: [
       {
-        id: "vault_manager",
-        title: "Vault Manager (optional status)",
-        do_this: "Call vault_manager for list/status when Apps render — prefer Terminal for add.",
-      },
-      {
         id: "list_secrets",
         title: "List via MCP",
         do_this: "After Terminal add, call list_secrets or vault_status (no values).",
+      },
+      {
+        id: "cli_menu",
+        title: "Interactive Terminal menu",
+        do_this: `Run ${bundledCliCommand("")} (no subcommand) for setup / unlock / add / remove / lock / status.`,
       },
     ],
     advanced_escape_hatch: {
@@ -532,8 +521,8 @@ function recoveryGuidance(opts: {
         what_to_do: [
           `Run: ${bundledCliCommand("setup")}`,
           "Or set PASSWORD_SPACE_PASSPHRASE under Settings → MCP → password-space → Environment, then vault_init {}.",
-          "Optional: vault_manager for status only if MCP Apps UI renders.",
           "Never approve vault_init with empty {} and no passphrase channel.",
+          "Do not use App forms for create/add — Terminal CLI only.",
         ],
       };
     case "needs_unlock":
@@ -724,20 +713,27 @@ export async function vaultInitTool(
 
 export async function vaultUnlockTool(
   dataDir: string,
-  args: { passphrase?: string; ttl_hours?: number },
+  args: { passphrase?: string; ttl_hours?: number; until_lock?: boolean },
 ): Promise<ToolJsonResult> {
   assertNodeVersion();
   const passphrase = resolvePassphrase(args.passphrase);
-  const ttlHours = args.ttl_hours ?? 8;
-  const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1000;
-  const { expiresAt } = await unlockVaultToSession(passphrase, { dataDir, ttlMs });
+  const ttlMs =
+    args.until_lock === true
+      ? null
+      : Math.max(0.1, args.ttl_hours ?? 8) * 60 * 60 * 1000;
+  const { expiresAt, untilLock } = await unlockVaultToSession(passphrase, {
+    dataDir,
+    ttlMs,
+  });
   return jsonResult({
     ok: true,
     unlocked: true,
     data_dir: dataDir,
     expires_at: expiresAt,
-    next: "Use vault_set_secret to store credentials, then inject_secret for agent use.",
-    note: "Passphrase was not returned and must not be pasted into chat.",
+    until_lock: untilLock,
+    session_path: sessionPath(dataDir),
+    next: "Prefer Terminal for add/remove. Agents: list_secrets / inject_secret. Lock via Terminal lock or vault_lock.",
+    note: "Passphrase was not returned and must not be pasted into chat. Session lives under ~/.password-space/session (0600).",
   });
 }
 
@@ -761,15 +757,21 @@ export async function vaultChangePassphraseTool(
   if (!next || next.length < 8) {
     throw new Error("new_passphrase must be at least 8 characters.");
   }
-  const ttlHours = args.ttl_hours ?? 8;
-  const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1000;
-  const { expiresAt } = await changeVaultPassphrase(current, next, { dataDir, ttlMs });
+  const ttlMs =
+    args.ttl_hours === undefined
+      ? undefined
+      : Math.max(0.1, args.ttl_hours) * 60 * 60 * 1000;
+  const { expiresAt, untilLock } = await changeVaultPassphrase(current, next, {
+    dataDir,
+    ttlMs,
+  });
   return jsonResult({
     ok: true,
     changed: true,
     unlocked: true,
     data_dir: dataDir,
     expires_at: expiresAt,
+    until_lock: untilLock,
     note: "Passphrase updated. Session refreshed. Passphrases were not returned.",
   });
 }
@@ -785,9 +787,8 @@ export function vaultDeleteSecretTool(store: VaultStore, name: string): ToolJson
 }
 
 /**
- * Vault Manager entry tool — optional status UI (progressive enhancement).
- * Primary create / unlock / add path is Terminal CLI.
- * Hosts with MCP Apps may render `ui://password-space/vault-manager.html`.
+ * Vault Manager — status-only JSON (+ optional Apps UI). Not a human setup path.
+ * Agents must steer create / unlock / add / remove / lock to the Terminal CLI.
  */
 export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonResult {
   clearExpiredInjectFiles(dataDir);
@@ -806,48 +807,46 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
   return jsonResult({
     ok: true,
     app: "vault-manager",
+    mode: "status_only",
     ui_resource: "ui://password-space/vault-manager.html",
-    /** Hosts must bind this URI from tool _meta.ui.resourceUri + Apps resource. */
     resource_mime_hint: "text/html;profile=mcp-app",
     progressive_enhancement:
-      "Optional status UI when MCP Apps render. Primary create/unlock/add is plugin-bundled Terminal CLI. Never paste App HTML/JS into chat.",
-    apps_ui_expected: true,
-    /** Agent contract: this tool returns JSON + Apps metadata only — never the UI bundle source. */
+      "Status-only. Do not guide users to App forms for create/unlock/add. Human UX is the plugin Terminal CLI.",
+    apps_ui_expected: false,
     agent_contract:
-      "Do not fetch or paste ui://password-space/vault-manager.html into the conversation. Prefer Terminal for create/unlock/add; use list_secrets / inject_secret / vault_lock after unlock.",
-    apps_fallback: needsPassphraseChannel
-      ? {
-          reason:
-            "Prefer Terminal for passphrase entry. If no App UI rendered, run copy_paste_command or set PASSWORD_SPACE_PASSPHRASE. Do not call vault_init with empty {}. Do not dump App source.",
-          recommended_path: "cli_setup",
-          next_tool: store.isInitialized() ? "cli_unlock" : "cli_setup",
-          copy_paste_command: cliCommand,
-          mcp_env_alternative: MCP_ENV_PATH,
-          never: [
-            "Paste vault-manager.html / minified JS into chat",
-            "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
-            "Collect passphrase or secret values in App forms when Terminal is available",
-          ],
-        }
-      : {
-          reason: `App UI unavailable — use Terminal \`${CLI_SETUP_COMMANDS.plugin_set}\` to add secrets, then list_secrets / inject_secret. Never dump UI resource body into chat.`,
-          recommended_path: "cli_set",
-          copy_paste_command: bundledCliCommand("set"),
-          never: [
-            "Paste vault-manager.html / minified JS into chat",
-            "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
-          ],
-        },
+      "Do not call vault_manager for setup. Show Terminal copy_paste_command instead. Use list_secrets / inject_secret / vault_lock after unlock. Never paste App HTML/JS into chat.",
+    apps_fallback: {
+      reason:
+        "Human setup/credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms.",
+      recommended_path: needsPassphraseChannel
+        ? store.isInitialized()
+          ? "cli_unlock"
+          : "cli_setup"
+        : "cli_set",
+      next_tool: needsPassphraseChannel
+        ? store.isInitialized()
+          ? "cli_unlock"
+          : "cli_setup"
+        : "cli_set",
+      copy_paste_command: needsPassphraseChannel ? cliCommand : bundledCliCommand("set"),
+      mcp_env_alternative: MCP_ENV_PATH,
+      never: [
+        "Guide users to Vault Manager / App forms for create, unlock, or add",
+        "Paste vault-manager.html / minified JS into chat",
+        "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
+        "Call vault_init with empty {}",
+      ],
+    },
     host_limitation: needsPassphraseChannel ? HOST_LIMITATION : undefined,
     status: parsed,
     secrets,
     capabilities: {
-      list: "list_secrets",
-      add_or_edit: "cli_set (Terminal) / vault_set_secret",
-      remove: "vault_delete_secret",
-      lock: "vault_lock",
-      unlock: "cli_unlock (Terminal) / vault_unlock",
-      change_passphrase: "vault_change_passphrase",
+      list: "list_secrets (MCP) or Terminal list",
+      add_or_edit: "Terminal set / interactive menu only",
+      remove: "Terminal remove (or vault_delete_secret after unlock)",
+      lock: "Terminal lock / vault_lock",
+      unlock: "Terminal unlock (choose 1d / 1w / until-lock)",
+      change_passphrase: "Terminal change-passphrase",
       inject: "inject_secret",
     },
     passphrase_note:

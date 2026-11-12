@@ -29,7 +29,7 @@ function main() {
     JSON.stringify({
       continue: true,
       additional_context:
-        "Password Space: vault not set up — run /setup-password-space, call vault_onboard, follow primary_action (Terminal: node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup — no clone; passphrase hidden in Terminal). Optional PASSWORD_SPACE_PASSPHRASE in MCP Environment. Never empty {}. Do not ask the user to edit mcp.json.",
+        "Password Space: vault not set up — run /setup-password-space, call vault_onboard, follow primary_action (Terminal: node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup — no clone; choose 1d/1w/until-lock; passphrase hidden). Optional PASSWORD_SPACE_PASSPHRASE in MCP Environment. Never empty {}. Do not use App forms. Do not ask the user to edit mcp.json.",
     }),
   );
 }

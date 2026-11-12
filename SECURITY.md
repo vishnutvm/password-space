@@ -21,7 +21,7 @@ Password Space is a **local-only** encrypted credential vault. There is no cloud
 | KDF | scrypt via Node.js `crypto.scrypt` — N=2¹⁵, r=8, p=1; random 32-byte salt per vault |
 | AEAD | AES-256-GCM; random 12-byte IV per encryption; auth tag verified on decrypt |
 | At rest | Random 32-byte vault key wrapped by passphrase-derived key; each secret encrypted under the vault key |
-| Unlock session | Vault key wrapped and stored under `$PASSWORD_SPACE_HOME/session` with mode `0600` and TTL (default 8h) |
+| Unlock session | Vault key wrapped and stored under `$PASSWORD_SPACE_HOME/session` with mode `0600`; CLI duration 1d / 1w / until-lock (scripts default 8h) |
 | Inject files | Short-lived env files under `inject/` with mode `0600` (default TTL metadata 5 minutes) |
 
 We do **not** invent cryptographic primitives. Lost unlock passphrase = **data unrecoverable** (no recovery kit in MVP).
