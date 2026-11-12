@@ -55,6 +55,26 @@ function dataDirFrom(flags: Record<string, string | boolean>): string {
   return typeof d === "string" ? d : defaultDataDir();
 }
 
+async function promptVisible(question: string): Promise<string> {
+  if (!input.isTTY) {
+    const rl = createInterface({ input, output: undefined, terminal: false });
+    return new Promise((resolve, reject) => {
+      rl.once("line", (line) => {
+        rl.close();
+        resolve(line.trim());
+      });
+      rl.once("close", () => reject(new Error("No input on stdin")));
+    });
+  }
+  const rl = createInterface({ input, output, terminal: true });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
 async function promptHidden(question: string): Promise<string> {
   if (!input.isTTY) {
     // Non-interactive: read one line from stdin
@@ -117,7 +137,8 @@ Commands:
   lock                 Clear unlock session
   status               Show vault / lock status
   change-passphrase    Re-wrap vault under a new passphrase
-  set <name>           Store or update a secret (prompts for value)
+  set [name]           Store or update a secret (prompts for name + hidden value)
+  add                  Alias for set — interactive name + value prompts
   get <name>           Print secret value (human only — not for agents)
   list                 List secret names / metadata (no values)
   delete <name>        Delete a secret
@@ -200,9 +221,13 @@ Password Space — setup
   }
 
   console.log(`
-Done. Back in Cursor:
-  • Ask the agent to run vault_status
-  • Save a token with vault_set_secret (approval form only)
+Done. Next (still in Terminal — never paste values in Cursor chat):
+  pnpm password-space set
+  # prompts for name, then hidden value
+
+Back in Cursor:
+  • Ask the agent for vault_status / list_secrets
+  • Agents use inject_secret (no values in chat)
 `);
 }
 
@@ -232,7 +257,7 @@ async function main(): Promise<void> {
 
         if (!initialized) {
           console.log("Password Space — next step\n");
-          console.log("  Recommended (Cursor often has no passphrase field):");
+          console.log("  Recommended (Terminal — hidden passphrase prompts):");
           console.log("    password-space setup");
           console.log("    or: pnpm password-space setup   (from a clone)");
           console.log("\n  One-click alternative:");
@@ -246,7 +271,8 @@ async function main(): Promise<void> {
           console.log("  Or: set PASSWORD_SPACE_PASSPHRASE in MCP Environment, then vault_unlock {}");
           break;
         }
-        console.log("Vault ready. Next: vault_set_secret in Cursor  (or password-space set <NAME>)");
+        console.log("Vault ready. Next: password-space set   (prompts for name + hidden value)");
+        console.log("  Then in Cursor: vault_status / list_secrets / inject_secret");
         break;
       }
 
@@ -325,9 +351,15 @@ async function main(): Promise<void> {
         break;
       }
 
-      case "set": {
-        const name = args.positional[0];
-        if (!name) throw new VaultError("Usage: password-space set <name>", "INVALID");
+      case "set":
+      case "add": {
+        let name = args.positional[0];
+        if (!name) {
+          name = await promptVisible("Secret name: ");
+        }
+        if (!name) {
+          throw new VaultError("Usage: password-space set [name]", "INVALID");
+        }
         const store = openVault({ dataDir, useSession: true });
         ensureUnlocked(store);
         let value: string;
@@ -337,7 +369,11 @@ async function main(): Promise<void> {
           value = await readAllStdin();
           value = value.replace(/\n$/, "");
         } else {
-          value = await promptHidden(`Value for ${name}: `);
+          value = await promptHidden(`Value for ${name} (hidden): `);
+        }
+        if (!value) {
+          store.close();
+          throw new VaultError("Secret value cannot be empty", "INVALID");
         }
         const tags =
           typeof args.flags.tags === "string"
@@ -350,6 +386,7 @@ async function main(): Promise<void> {
           console.log(JSON.stringify(meta, null, 2));
         } else {
           console.log(`Saved ${meta.name} (${meta.id})`);
+          console.log("Value was not printed. In Cursor: list_secrets / inject_secret.");
         }
         break;
       }
