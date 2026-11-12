@@ -66,7 +66,7 @@ Day-1 setup does **not** require `git clone` or `pnpm`.
 2. **+ Add Marketplace** → **Import from GitHub**.
 3. Paste: `https://github.com/vishnutvm/password-space`
 4. Install the **password-space** plugin.
-5. Optional custom vault path: set a **real** `PASSWORD_SPACE_HOME` (absolute path) in the environment or a hand-written MCP `env` block. Leave it unset to use `~/.password-space`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default.
+5. Optional custom vault path: **Plugins → password-space → Configure** → **Password Space home** (leave blank for `~/.password-space`). You can also set a **real** absolute `PASSWORD_SPACE_HOME` in the process environment or MCP `env`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default.
 6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`** and walk you through the checklist.
 
 7. **Default:** follow `primary_action` — open **Vault Manager** (`vault_manager`), then create/unlock in the App UI or type the passphrase in a visible MCP approval form. Approving empty `{}` fails with `passphrase_missing`.
@@ -150,7 +150,7 @@ Without the marketplace, point Cursor (or another MCP client) at the **bundled**
 }
 ```
 
-`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`. If you override, use a concrete absolute path only (never an unresolved `${PASSWORD_SPACE_HOME}` placeholder).
+`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`. Marketplace installs can set it via **Plugins → Configure → Password Space home**. If you override in MCP `env`, use a concrete absolute path only (never an unresolved `${PASSWORD_SPACE_HOME}` placeholder).
 
 Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugins/password-space/skills/password-space/`. Hooks: `plugins/password-space/hooks/hooks.json`.
 
