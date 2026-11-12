@@ -19,7 +19,7 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
-import { defaultDataDir, openVault } from "@password-space/vault";
+import { defaultDataDir } from "@password-space/vault";
 import {
   CLI_SETUP_COMMANDS,
   HOST_LIMITATION,
@@ -40,6 +40,7 @@ import {
   vaultStatusTool,
   vaultUnlockTool,
 } from "./tools.js";
+import { withVaultStore } from "./with-store.js";
 
 const VAULT_MANAGER_UI = "ui://password-space/vault-manager.html";
 const FALLBACK_VAULT_MANAGER_HTML =
@@ -74,15 +75,6 @@ function loadVaultManagerHtml(): string {
 // defaultDataDir ignores empty / unresolved `${PASSWORD_SPACE_HOME}` placeholders
 const dataDir = defaultDataDir();
 
-function withStore<T>(fn: (store: ReturnType<typeof openVault>) => T): T {
-  const store = openVault({ dataDir, useSession: true });
-  try {
-    return fn(store);
-  } finally {
-    store.close();
-  }
-}
-
 const passphraseSchema = z
   .string()
   .min(8, "Passphrase must be at least 8 characters.")
@@ -108,7 +100,7 @@ server.registerTool(
   },
   async () => {
     try {
-      return withStore((store) => vaultOnboardTool(store, dataDir));
+      return await withVaultStore(dataDir, (store) => vaultOnboardTool(store, dataDir));
     } catch (err) {
       return errorResult(err);
     }
@@ -124,7 +116,7 @@ server.registerTool(
   },
   async () => {
     try {
-      return withStore((store) => vaultStatusTool(store, dataDir));
+      return await withVaultStore(dataDir, (store) => vaultStatusTool(store, dataDir));
     } catch (err) {
       return errorResult(err);
     }
@@ -141,7 +133,7 @@ server.registerTool(
   },
   async ({ passphrase }) => {
     try {
-      return await withStore((store) => vaultInitTool(store, dataDir, { passphrase }));
+      return await withVaultStore(dataDir, (store) => vaultInitTool(store, dataDir, { passphrase }));
     } catch (err) {
       return errorResult(err);
     }
@@ -227,7 +219,7 @@ server.registerTool(
   },
   async ({ name }) => {
     try {
-      return withStore((store) => vaultDeleteSecretTool(store, name));
+      return await withVaultStore(dataDir, (store) => vaultDeleteSecretTool(store, name));
     } catch (err) {
       return errorResult(err);
     }
@@ -249,7 +241,7 @@ registerAppTool(
   },
   async () => {
     try {
-      const result = withStore((store) => vaultManagerTool(store, dataDir));
+      const result = await withVaultStore(dataDir, (store) => vaultManagerTool(store, dataDir));
       // Ensure Apps hosts can bind the UI even when reading tool result only.
       return {
         ...result,
@@ -316,7 +308,7 @@ server.registerTool(
   },
   async ({ name, value, tags, notes }) => {
     try {
-      return withStore((store) =>
+      return await withVaultStore(dataDir, (store) =>
         vaultSetSecretTool(store, { name, value, tags, notes }),
       );
     } catch (err) {
@@ -333,7 +325,7 @@ server.tool(
   },
   async ({ tag }) => {
     try {
-      return withStore((store) => listSecretsTool(store, tag));
+      return await withVaultStore(dataDir, (store) => listSecretsTool(store, tag));
     } catch (err) {
       return errorResult(err);
     }
@@ -348,7 +340,7 @@ server.tool(
   },
   async ({ name }) => {
     try {
-      return withStore((store) => getSecretMetadataTool(store, name));
+      return await withVaultStore(dataDir, (store) => getSecretMetadataTool(store, name));
     } catch (err) {
       return errorResult(err);
     }
@@ -367,7 +359,7 @@ server.tool(
   },
   async ({ name, env_var }) => {
     try {
-      return withStore((store) => injectSecretTool(store, dataDir, { name, env_var }));
+      return await withVaultStore(dataDir, (store) => injectSecretTool(store, dataDir, { name, env_var }));
     } catch (err) {
       return errorResult(err);
     }
@@ -386,7 +378,7 @@ server.tool(
   },
   async ({ name, confirm_redaction }) => {
     try {
-      return withStore((store) =>
+      return await withVaultStore(dataDir, (store) =>
         resolveSecretTool(store, { name, confirm_redaction: confirm_redaction === true }),
       );
     } catch (err) {
