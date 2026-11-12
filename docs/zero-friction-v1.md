@@ -28,12 +28,12 @@ SDK **`@modelcontextprotocol/sdk` ^1.32** supports:
 
 ### Passphrase / secret UX (current)
 
-1. **Primary:** Plugin Terminal CLI `setup` / `unlock` / `set` (no clone)
+1. **Primary:** Plugin Terminal CLI interactive menu / `setup` / `unlock` / `set` / `remove` / `lock` (no clone; choose 1d / 1w / until-lock)
 2. **Optional:** MCP Environment `PASSWORD_SPACE_PASSPHRASE` → `vault_init {}` / `vault_unlock {}`
-3. **Optional status:** `vault_manager` when MCP Apps render (not for primary add)
+3. **Do not** guide App forms for create/unlock/add — `vault_manager` is status-only
 4. **Contributors only:** clone + `pnpm password-space …`
 
-## MCP Apps — Vault Manager (optional)
+## MCP Apps — Vault Manager (status-only; not a setup path)
 
 Pinned **`@modelcontextprotocol/ext-apps@^1.7.5`** (SDK 1.x line).
 

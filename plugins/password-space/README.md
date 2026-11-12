@@ -9,27 +9,28 @@
 | Piece | Purpose |
 | --- | --- |
 | MCP server (`dist/index.js`) | Status, list, inject, lock after unlock |
-| Terminal CLI (`dist/cli.js`) | Create / unlock / add secrets with hidden prompts — **bundled; no clone** |
-| Skill + `/setup-password-space` | Guided setup — Terminal-first |
+| Terminal CLI (`dist/cli.js`) | **Sole human UX** — interactive menu + setup / unlock / add / remove / lock (hidden prompts) — **bundled; no clone** |
+| Skill + `/setup-password-space` | Guided setup — Terminal-only |
 | Hooks | Gentle welcome when no vault yet; redaction before send |
 
 ## After install
 
-1. In chat: **`/setup-password-space`** — follow `primary_action` (**Terminal** first).
+1. In chat: **`/setup-password-space`** — follow `primary_action` (**Terminal** only).
 2. Open Terminal and run the shown **`copy_paste_command`** — typically:
    ```bash
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
    ```
-   (After Reload, the agent may show an absolute path to the same `cli.js`.) Passphrase is typed there, hidden. **No git clone.**
-3. Add a credential:
+   Choose unlock duration (**1 day** / **1 week** / **until lock**). Passphrase is typed there, hidden. **No git clone.**
+3. Add a credential (or open the menu with no subcommand):
    ```bash
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"        # interactive menu
    ```
 4. Back in Cursor: `vault_status` / `list_secrets` / `inject_secret`. Never approve empty `{}` when Cursor shows no passphrase field.
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
-**Trust:** Local encryption. Passphrases and tokens stay out of the conversation.
+**Trust:** Local encryption. Passphrases and tokens stay out of the conversation. Unlock session: `~/.password-space/session` (0600).
 
 Default vault folder: `~/.password-space`. Optional override: a real absolute `PASSWORD_SPACE_HOME` in the process environment or MCP Environment (never an unresolved `${PASSWORD_SPACE_HOME}`).
 
@@ -41,7 +42,7 @@ Default vault folder: `~/.password-space`. Optional override: a real absolute `P
 | `vault_status` / `list_secrets` | No |
 | `inject_secret` | No — **preferred** for agents |
 | `vault_lock` | No |
-| `vault_manager` | No — optional status UI only |
+| `vault_manager` | No — status-only; **do not** use for create/add |
 
 More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [zero-friction-v1.md](../../docs/zero-friction-v1.md). CLI details: [root README](../../README.md).
 

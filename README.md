@@ -25,7 +25,7 @@ Password Space keeps **ciphertext on disk**, an **explicit unlock** gate, and an
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
 | Day-1 Terminal + MCP | Terminal `setup` / `set` for passphrase and secrets; MCP `vault_status`, `list_secrets`, `inject_secret`, `vault_lock` after unlock |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
-| Session TTL | Unlock session expires (default **8 hours**); expired sessions are rejected and cleared |
+| Session TTL | Interactive unlock chooses **1 day**, **1 week**, or **until lock**; scripts default **8 hours**; expired sessions are rejected and cleared |
 | Redaction hook | Optional `beforeSubmitPrompt` hook strips **known** inject values from outbound prompts |
 | Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
@@ -40,7 +40,7 @@ When the vault is **locked**, mutating/read tools fail until unlock again. Resta
 | Area | MVP behavior |
 | --- | --- |
 | KDF / encryption | scrypt (N=2¹⁵, r=8, p=1) + AES-256-GCM via Node `crypto` — see [SECURITY.md](./SECURITY.md) |
-| Unlock session | `$PASSWORD_SPACE_HOME/session`, mode `0600`, default TTL 8h; lock deletes it |
+| Unlock session | `$PASSWORD_SPACE_HOME/session`, mode `0600`; CLI chooses 1d / 1w / until-lock (scripts default 8h); lock deletes it |
 | Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, mode `0600`, default TTL **5 minutes** (consume then delete) |
 | Passphrase loss | **No recovery** — ciphertext is unrecoverable without the unlock passphrase |
 | Redaction | Only **known** values from inject files / explicit secret lists — not a universal DLP |
@@ -68,10 +68,11 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`**.
 7. **Default:** follow `primary_action` — open **Terminal** and run `copy_paste_command`. **No repo clone.** Typical commands after marketplace install + Reload:
    ```bash
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup   # passphrase + unlock duration (1d / 1w / until lock)
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set     # name + hidden value
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"         # interactive menu (all human actions)
    ```
-   Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`.
+   Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`. There is **no App UI** for create/add.
 8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}`.
 
 ```text
@@ -233,7 +234,7 @@ Detail: [docs/architecture.md](./docs/architecture.md).
 | `node:sqlite` / MCP fails to start | Node &lt; 20 | Upgrade to Node 20+ (`node -v`) |
 | `Vault not initialized` | No `vault_init` yet | Ask the agent to call `vault_init`, or CLI `password-space init` |
 | `Vault is locked` / `No unlock session` | Locked or expired session | Call `vault_unlock`, or CLI `password-space unlock` |
-| `Unlock session expired` | TTL elapsed (default 8h) | Unlock again; use `ttl_hours` / `--ttl` if you need longer |
+| `Unlock session expired` | TTL elapsed | Unlock again in Terminal; choose 1 day / 1 week / until lock, or `--ttl 1d\|1w\|until-lock` |
 | `Wrong passphrase` | Typo or wrong vault | Confirm `PASSWORD_SPACE_HOME` matches the vault you meant |
 | Plugin installed but MCP errors “locked” | Session missing/expired | Call `vault_unlock` (same `PASSWORD_SPACE_HOME`) |
 | Secret not found | Wrong name / empty vault | `list_secrets` after unlock |

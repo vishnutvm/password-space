@@ -8,7 +8,13 @@ export * from "./inject.js";
 export * from "./unlock-guard.js";
 
 import { VaultStore } from "./store.js";
-import { clearSession, readSession, writeSession, hasValidSession } from "./session.js";
+import {
+  clearSession,
+  readSession,
+  writeSession,
+  hasValidSession,
+  type SessionTtlMs,
+} from "./session.js";
 import { defaultDataDir, sessionPath, vaultDbPath } from "./paths.js";
 import { clearExpiredInjectFiles } from "./inject.js";
 import {
@@ -42,8 +48,8 @@ export function openVault(opts: OpenVaultOptions = {}): VaultStore {
 
 export async function unlockVaultToSession(
   passphrase: string,
-  opts: { dataDir?: string; ttlMs?: number } = {},
-): Promise<{ expiresAt: string }> {
+  opts: { dataDir?: string; ttlMs?: SessionTtlMs } = {},
+): Promise<{ expiresAt: string | null; untilLock: boolean }> {
   const dataDir = opts.dataDir ?? defaultDataDir();
   await beforeUnlockAttempt(dataDir);
   clearExpiredInjectFiles(dataDir);
@@ -55,7 +61,7 @@ export async function unlockVaultToSession(
     vaultKey.fill(0);
     session.vaultKey.fill(0);
     recordUnlockSuccess(dataDir);
-    return { expiresAt: session.expiresAt };
+    return { expiresAt: session.expiresAt, untilLock: session.untilLock };
   } catch (err) {
     if (err instanceof VaultError && err.code === "WRONG_PASSPHRASE") {
       recordUnlockFailure(dataDir);
@@ -69,8 +75,8 @@ export async function unlockVaultToSession(
 export async function changeVaultPassphrase(
   currentPassphrase: string,
   nextPassphrase: string,
-  opts: { dataDir?: string; ttlMs?: number } = {},
-): Promise<{ expiresAt: string }> {
+  opts: { dataDir?: string; ttlMs?: SessionTtlMs } = {},
+): Promise<{ expiresAt: string | null; untilLock: boolean }> {
   const dataDir = opts.dataDir ?? defaultDataDir();
   await beforeUnlockAttempt(dataDir);
   const store = new VaultStore(vaultDbPath(dataDir));
@@ -81,7 +87,7 @@ export async function changeVaultPassphrase(
     vaultKey.fill(0);
     session.vaultKey.fill(0);
     recordUnlockSuccess(dataDir);
-    return { expiresAt: session.expiresAt };
+    return { expiresAt: session.expiresAt, untilLock: session.untilLock };
   } catch (err) {
     if (err instanceof VaultError && err.code === "WRONG_PASSPHRASE") {
       recordUnlockFailure(dataDir);

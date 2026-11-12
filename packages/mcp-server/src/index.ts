@@ -147,7 +147,7 @@ server.registerTool(
   {
     title: "Unlock your vault",
     description:
-      "Step 3 of setup: unlocks for this session so you can save and use credentials. Same passphrase in the approval form.",
+      "Unlocks for this machine session (prefer Terminal unlock with 1 day / 1 week / until lock). Same passphrase in the approval form only if using MCP path.",
     inputSchema: {
       ...optionalPassphraseShape,
       ttl_hours: z
@@ -155,12 +155,16 @@ server.registerTool(
         .min(0.1)
         .max(168)
         .optional()
-        .describe("How long to stay unlocked in hours (default 8, max 168)."),
+        .describe("How long to stay unlocked in hours (default 8, max 168). Ignored when until_lock is true."),
+      until_lock: z
+        .boolean()
+        .optional()
+        .describe("If true, session does not auto-expire until vault_lock / CLI lock."),
     },
   },
-  async ({ passphrase, ttl_hours }) => {
+  async ({ passphrase, ttl_hours, until_lock }) => {
     try {
-      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours });
+      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours, until_lock });
     } catch (err) {
       return errorResult(err);
     }
@@ -185,7 +189,7 @@ server.registerTool(
   {
     title: "Change vault passphrase",
     description:
-      "Re-wraps the vault key under a new passphrase. Enter current and new passphrase in the approval form or Vault Manager App — never in chat, never via elicitation.",
+      "Re-wraps the vault key under a new passphrase. Prefer Terminal `change-passphrase` (hidden prompts). Approval-form args only as last resort — never in chat, never via elicitation.",
     inputSchema: {
       current_passphrase: passphraseSchema.optional().describe(
         "Current vault passphrase. Optional if PASSWORD_SPACE_PASSPHRASE is set.",
@@ -232,9 +236,9 @@ registerAppTool(
   server,
   "vault_manager",
   {
-    title: "Open Vault Manager",
+    title: "Vault status (optional)",
     description:
-      "Optional Password Space Vault Manager status UI (Cursor MCP Apps 2.6+). Primary create/unlock/add is the plugin-bundled Terminal CLI (`node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup|unlock|set`). Prefer list_secrets / inject_secret / vault_lock after unlock. Do not vault_init with empty {}.",
+      "Status-only. Do NOT use for create/unlock/add — human UX is the plugin Terminal CLI (`node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\"` menu|setup|unlock|set|remove|lock). Prefer vault_status / list_secrets / inject_secret / vault_lock. Do not vault_init with empty {}.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },

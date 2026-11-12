@@ -40,8 +40,9 @@ node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
 (If the agent shows an absolute path to `…/dist/cli.js`, use that — same binary.)
 
 4. Type your passphrase at the **hidden** prompts (8+ characters)
+5. Choose how long to stay unlocked: **1 day**, **1 week**, or **until lock** (no auto-expiry until you run `lock`)
 
-Do **not** approve empty `{}` in Cursor. Do **not** clone the repo for day-1 setup.
+Do **not** approve empty `{}` in Cursor. Do **not** clone the repo for day-1 setup. Do **not** use App forms for create/add — Terminal only.
 
 #### Optional: MCP Environment (skip Terminal passphrase)
 
@@ -54,11 +55,14 @@ You do **not** edit `mcp.json`. You do **not** need to understand MCP. Vault hom
 ```bash
 node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
 # prompts: Secret name → Value for NAME (hidden)
+
+# or full interactive menu:
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"
 ```
 
-- Agent access: **`inject_secret`**
-- Status / list: **`vault_status`** / **`list_secrets`**
-- Done for the day: **`vault_lock`**
+- Agent access: **`inject_secret`** (works while `~/.password-space/session` is valid)
+- Status / list: **`vault_status`** / **`list_secrets`** (or Terminal `list`)
+- Done: Terminal `lock` or MCP **`vault_lock`**
 
 ## Troubleshooting
 

@@ -34,7 +34,7 @@ Never approve `vault_init` / `vault_unlock` with empty fields unless `PASSWORD_S
 - **Status / list:** `vault_status` / `list_secrets`
 - **Use a saved credential:** `inject_secret` (preferred — no value in chat)
 - **Done for the day:** `vault_lock`
-- **Optional UI:** `vault_manager` for status only when MCP Apps render
+- **No App UI for secrets:** human create/unlock/add/remove/lock is Terminal-only; ignore `vault_manager` for setup
 
 ## Need help?
 
