@@ -15,18 +15,14 @@
 
 ## After install
 
-1. In chat: **`/setup-password-space`** — follow `primary_action` (**Terminal** only).
-2. Open Terminal and run the shown **`copy_paste_command`** — typically:
+1. In chat: **`/setup-password-space`** — follow `primary_action` (**Terminal** only for create/unlock).
+2. When not set up yet, open Terminal and run the shown **`copy_paste_command`** — typically:
    ```bash
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
    ```
    Choose unlock duration (**1 day** / **1 week** / **until lock**). Passphrase is typed there, hidden. **No git clone.**
-3. Add a credential (or open the menu with no subcommand):
-   ```bash
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"        # interactive menu
-   ```
-4. Back in Cursor: `vault_status` / `list_secrets` / `inject_secret`. Never approve empty `{}` when Cursor shows no passphrase field.
+3. When the vault is **ready**, chat stays short: ask which named secret to use (e.g. `GITHUB_TOKEN`). Prefer `list_secrets` / `inject_secret`. Show Terminal `set` / `remove` **only** if they ask to add or remove — do not re-dump long CLI paths every turn.
+4. Never approve empty `{}` when Cursor shows no passphrase field.
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 

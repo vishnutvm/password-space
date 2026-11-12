@@ -46,7 +46,8 @@ Pinned **`@modelcontextprotocol/ext-apps@^1.7.5`** (SDK 1.x line).
 ## Agent contract
 
 - Follow **`primary_action` only**
-- When `recommended_path` is `cli_setup` / `cli_unlock` / `cli_set`, show **`copy_paste_command`** and wait
+- When `recommended_path` is `cli_setup` / `cli_unlock`, show **`copy_paste_command`** and wait
+- When `primary_action.id` / `setup_state` is **`ready`**, keep chat short: ask for a named secret (e.g. GITHUB_TOKEN); show Terminal `copy_paste_command` only for explicit add/remove
 - Never tell the user to reply **"ready"** then call `vault_init` without a passphrase channel
 - Never call elicitation for passphrase or secret values
 - Never instruct users to edit `mcp.json` or clone for day-1 setup

@@ -66,17 +66,17 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 4. Install the **password-space** plugin and reload Cursor.
 5. Vault home defaults to **`~/.password-space`**. Optional override: a **real** absolute `PASSWORD_SPACE_HOME` in the process environment or MCP `env`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default. There is **no** Plugins → Configure UI for this.
 6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`**.
-7. **Default:** follow `primary_action` — open **Terminal** and run `copy_paste_command`. **No repo clone.** Typical commands after marketplace install + Reload:
+7. **Default:** follow `primary_action`. For create/unlock, open **Terminal** and run `copy_paste_command`. **No repo clone.** Typical first-run commands after marketplace install + Reload:
    ```bash
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup   # passphrase + unlock duration (1d / 1w / until lock)
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set     # name + hidden value
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"         # interactive menu (all human actions)
    ```
-   Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`. There is **no App UI** for create/add.
+   After the vault is **ready**, chat stays short: ask which named secret to use (e.g. `GITHUB_TOKEN`) and prefer `inject_secret` — do **not** re-dump long CLI paths every turn. Show Terminal `set` / `remove` only when adding or removing. Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`. There is **no App UI** for create/add.
 8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}`.
 
 ```text
-vault_onboard → Terminal: …/dist/cli.js setup → …/dist/cli.js set → vault_status / list_secrets → inject_secret
+vault_onboard → Terminal: …/dist/cli.js setup → (ready) ask named secret → inject_secret / list_secrets
+# add/remove only when asked: …/dist/cli.js set|remove
 # optional: MCP Environment PASSWORD_SPACE_PASSPHRASE → vault_init {} → vault_unlock {}
 ```
 

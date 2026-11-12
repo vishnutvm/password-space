@@ -645,9 +645,9 @@ async function main(): Promise<void> {
           console.log("  Choose session duration at the prompt.");
           break;
         }
-        console.log('Vault ready. Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
-        console.log("  Or run without args for the interactive menu.");
-        console.log("  Then in Cursor: vault_status / list_secrets / inject_secret");
+        console.log("Vault ready. Ask which named secret to use (e.g. GITHUB_TOKEN).");
+        console.log("  Prefer: vault_status / list_secrets / inject_secret in Cursor.");
+        console.log("  Add/remove only when needed: set | remove (or run with no args for the menu).");
         break;
       }
 

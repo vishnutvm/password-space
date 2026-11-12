@@ -8,10 +8,11 @@ Setup for a **non-technical** user. **Never** ask for passphrase or tokens in ch
 
 1. Call **`vault_onboard`**.
 2. Read **`primary_action`** aloud in plain language — that is the **only** next step.
-3. If `recommended_path` / `primary_action.id` is **`cli_setup`**, **`cli_unlock`**, or **`cli_set`**: show **`copy_paste_command`** and wait for them to finish in Terminal. Then call **`vault_status`** / **`list_secrets`**.
-4. **Do not** ask them to reply "ready" and then call `vault_init` with empty `{}`.
-5. **Do not** tell them to `git clone` — the CLI is at `${CURSOR_PLUGIN_ROOT}/dist/cli.js` after plugin install + Reload.
-6. **Do not** call **`vault_manager`** or guide them to App forms for create / unlock / add.
+3. If `recommended_path` / `primary_action.id` is **`cli_setup`** or **`cli_unlock`**: show **`copy_paste_command`** and wait for them to finish in Terminal. Then call **`vault_status`**.
+4. If `primary_action.id` is **`ready`**: say the vault is ready and ask which **named secret** to use (e.g. GITHUB_TOKEN). Prefer **`list_secrets`** / **`inject_secret`**. Do **not** paste long `node …/dist/cli.js` paths.
+5. **Do not** ask them to reply "ready" and then call `vault_init` with empty `{}`.
+6. **Do not** tell them to `git clone` — the CLI is at `${CURSOR_PLUGIN_ROOT}/dist/cli.js` after plugin install + Reload.
+7. **Do not** call **`vault_manager`** or guide them to App forms for create / unlock / add.
 
 ## If Node is too old (`primary_action.id` = `fix_node`)
 
@@ -30,9 +31,11 @@ Tell them to install **Node.js 20+** from https://nodejs.org, reload Cursor, the
 - **`vault_unlock_env`:** call **`vault_unlock`**.
 - **Do not** call `vault_init` again.
 
-## If vault ready (`cli_set`)
+## If vault ready (`ready`)
 
-Show Terminal **`copy_paste_command`** for set (or bare `cli.js` for the interactive menu). After they finish, confirm with **`list_secrets`** / **`vault_status`**. Prefer **`inject_secret`** for agent use.
+Keep it short: **"Vault ready. Which secret should I use (e.g. GITHUB_TOKEN)?"** Prefer **`inject_secret`** / **`list_secrets`**.
+
+Show Terminal **`copy_paste_command`** **only** if they ask to **add** or **remove** a secret (from `primary_action.alternatives` `cli_set` / `cli_remove`). Never re-dump CLI paths on every turn.
 
 ## If `passphrase_missing` / empty `{}`
 
@@ -40,7 +43,8 @@ Stop the loop. Show `copy_paste_command` or MCP Environment path from the error 
 
 ## Rules
 
-- One primary action per turn until `vault_status` shows unlocked.
+- One primary action per turn until `vault_status` shows unlocked — then switch to named-secret / inject guidance.
+- Show full Terminal `copy_paste_command` only for setup, unlock, or explicit add/remove — not when already ready.
 - Summarize errors using **`howToFix` / `recovery` / `host_limitation`** — never dump JSON.
 - Confirm success without secret values.
 - Passphrase and secret values only via Terminal (hidden) or optional MCP Environment — never elicitation, never chat, never App create/add forms.

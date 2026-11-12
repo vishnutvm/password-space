@@ -163,11 +163,17 @@ describe("vault lifecycle MCP tools", () => {
     );
   });
 
-  it("buildPrimaryAction prefers cli_set when vault ready", () => {
+  it("buildPrimaryAction prefers ready (no CLI dump) when vault unlocked", () => {
     const action = buildPrimaryAction(true, true, true);
-    expect(action.id).toBe("cli_set");
-    expect(action.recommended_path).toBe("cli_set");
-    expect(action.copy_paste_command).toBe(bundledCliCommand("set"));
+    expect(action.id).toBe("ready");
+    expect(action.recommended_path).toBe("ready");
+    expect(action.copy_paste_command).toBeUndefined();
+    expect(action.mcp_tool).toBe("inject_secret");
+    expect(action.do_this).toMatch(/Vault ready/i);
+    expect(action.do_this).toMatch(/GITHUB_TOKEN|named secret/i);
+    expect(action.do_this).not.toMatch(/copy_paste_command/i);
+    const addAlt = action.alternatives?.find((a) => a.id === "cli_set");
+    expect(addAlt?.copy_paste_command).toBe(bundledCliCommand("set"));
   });
 
   it("CLI_SETUP_COMMANDS.plugin_* use CURSOR_PLUGIN_ROOT bundled cli.js", () => {
@@ -271,6 +277,46 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
   });
 
+  it("vault_onboard stays short when vault is ready (no CLI path dump)", async () => {
+    const dir = tempDir();
+    const store = new VaultStore(join(dir, "vault.db"));
+    await store.init("ready-vault-pass-xx");
+    store.close();
+    await vaultUnlockTool(dir, { passphrase: "ready-vault-pass-xx", ttl_hours: 1 });
+    const unlocked = openVault({ dataDir: dir, useSession: true });
+    const result = vaultOnboardTool(unlocked, dir);
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      setup_state: string;
+      human_summary: string;
+      primary_action: {
+        id: string;
+        do_this: string;
+        mcp_tool?: string;
+        copy_paste_command?: string;
+        alternatives?: Array<{ id: string; copy_paste_command?: string }>;
+      };
+      copy_paste_command: string | null;
+      next_tool: string;
+      recovery: { code: string; howToFix: string };
+    };
+    expect(parsed.setup_state).toBe("ready");
+    expect(parsed.primary_action.id).toBe("ready");
+    expect(parsed.primary_action.mcp_tool).toBe("inject_secret");
+    expect(parsed.copy_paste_command).toBeNull();
+    expect(parsed.primary_action.copy_paste_command).toBeUndefined();
+    expect(parsed.primary_action.do_this).toMatch(/Vault ready/i);
+    expect(parsed.primary_action.do_this).not.toMatch(/dist\/cli\.js/);
+    expect(parsed.human_summary).toMatch(/Vault ready/i);
+    expect(parsed.human_summary).not.toMatch(/dist\/cli\.js/);
+    expect(parsed.next_tool).toBe("inject_secret");
+    expect(parsed.recovery.code).toBe("ready");
+    expect(parsed.recovery.howToFix).not.toMatch(/dist\/cli\.js/);
+    expect(
+      parsed.primary_action.alternatives?.find((a) => a.id === "cli_set")?.copy_paste_command,
+    ).toBe(bundledCliCommand("set"));
+    unlocked.close();
+  });
+
   it("PassphraseRequiredError carries host_limitation and cli_setup path", () => {
     const err = new PassphraseRequiredError();
     expect(err.code).toBe("passphrase_missing");
@@ -352,15 +398,20 @@ describe("vault lifecycle MCP tools", () => {
       ui_resource: string;
       apps_ui_expected: boolean;
       agent_contract: string;
-      apps_fallback: { recommended_path: string; never?: string[] };
+      apps_fallback: {
+        recommended_path: string;
+        copy_paste_command?: string | null;
+        never?: string[];
+      };
       secrets: Array<{ name: string; value?: string }>;
       capabilities: Record<string, string>;
     };
     expect(parsed.app).toBe("vault-manager");
     expect(parsed.ui_resource).toMatch(/^ui:\/\//);
     expect(parsed.apps_ui_expected).toBe(false);
-    expect(parsed.apps_fallback.recommended_path).toBe("cli_set");
-    expect(parsed.agent_contract).toMatch(/Terminal/i);
+    expect(parsed.apps_fallback.recommended_path).toBe("ready");
+    expect(parsed.apps_fallback.copy_paste_command).toBeNull();
+    expect(parsed.agent_contract).toMatch(/Vault ready|inject_secret/i);
     expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
     expect(result.content[0]!.text).not.toMatch(/<!DOCTYPE html>/i);
     expect(result.content[0]!.text).not.toMatch(/ZodError|invalid_union/);
