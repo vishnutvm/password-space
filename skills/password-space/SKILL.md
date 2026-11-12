@@ -37,6 +37,8 @@ Encrypted vault on the user's Mac. **One obvious next step** — no competing pa
 
 `primary_action.advanced_escape_hatch` may mention `password-space setup` / `unlock`. Do **not** lead with it for newcomers.
 
+Optional vault home: **Plugins → password-space → Configure** → **Password Space home** (blank = `~/.password-space`). Passphrase is not a Configure variable.
+
 Optional env (avoids empty-form pain): **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE`.
 
 Safe line: *"Next step: I'll open Vault Manager — create your vault there (or type your passphrase in the approval form when Cursor asks). I won't ask for it in chat."*
