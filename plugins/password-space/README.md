@@ -23,7 +23,7 @@ You do **not** edit `mcp.json`. Requires **Node.js 20+**. Terminal is not requir
 
 **Trust:** Local encryption. Passphrases and tokens stay out of the conversation.
 
-Default vault folder: `~/.password-space`. Override with `PASSWORD_SPACE_HOME` in MCP Environment.
+Default vault folder: `~/.password-space`. Optional override: **Plugins → password-space → Configure** → **Password Space home** (or a real absolute `PASSWORD_SPACE_HOME` in MCP Environment).
 
 ## MCP tools (essentials)
 
