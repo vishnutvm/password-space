@@ -30,9 +30,10 @@ Never approve `vault_init` / `vault_unlock` with empty fields unless `PASSWORD_S
 
 ## Daily use
 
-- **Add a secret:** Terminal `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set`
-- **Status / list:** `vault_status` / `list_secrets`
+- **Vault ready:** ask which named secret to use (e.g. GITHUB_TOKEN) — no long CLI path dump every turn
 - **Use a saved credential:** `inject_secret` (preferred — no value in chat)
+- **Status / list:** `vault_status` / `list_secrets`
+- **Add / remove a secret:** Terminal `…/dist/cli.js set|remove` — only when you ask to add or remove
 - **Done for the day:** `vault_lock`
 - **No App UI for secrets:** human create/unlock/add/remove/lock is Terminal-only; ignore `vault_manager` for setup
 

@@ -71,6 +71,7 @@ node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"
 | Node too old / MCP won't start | Install Node **20+**, reload Cursor, run `/setup-password-space` again |
 | `passphrase_missing` / empty `{}` | **Stop retrying.** Run the Terminal `copy_paste_command`, or set `PASSWORD_SPACE_PASSPHRASE` |
 | Agent says reply "ready" then vault_init | Outdated skill — follow `primary_action` (Terminal first) |
+| Agent re-dumps long `…/dist/cli.js` paths every turn after unlock | Outdated skill — when `ready`, ask for a named secret; show Terminal command only for add/remove |
 | Agent asks you to clone the repo | Outdated guidance — use plugin `dist/cli.js` instead |
 | "Vault already initialized" | Unlock via Terminal `…/dist/cli.js unlock` — do not re-init |
 | "Vault locked" after restart | Terminal unlock, or MCP Environment + `vault_unlock` |

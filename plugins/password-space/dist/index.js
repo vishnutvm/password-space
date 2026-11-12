@@ -29714,28 +29714,35 @@ function buildPrimaryAction(initialized, unlocked, session, prereqOk = true) {
     };
   }
   return {
-    id: "cli_set",
-    title: "Add a credential in Terminal",
-    do_this: "Open Terminal and run the copy_paste_command (or bare cli.js for the interactive menu). Type the secret name, then the value at the hidden prompt. Never paste name/value in chat.",
-    recommended_path: "cli_set",
-    copy_paste_command: bundledCliCommand("set"),
-    never: "Never paste API keys or passwords into chat.",
+    id: "ready",
+    title: "Vault ready",
+    do_this: "Vault ready. Ask which named secret to use (e.g. GITHUB_TOKEN), then list_secrets / inject_secret. Do not re-dump long Terminal CLI paths unless they ask to add or remove a secret.",
+    mcp_tool: "inject_secret",
+    recommended_path: "ready",
+    never: "Never paste API keys or passwords into chat. Do not show Terminal copy_paste_command on every turn when the vault is already unlocked.",
     alternatives: [
+      {
+        id: "cli_set",
+        title: "Add a credential in Terminal",
+        do_this: "Only if they asked to add a secret: show copy_paste_command, wait for Terminal (name + hidden value), then list_secrets.",
+        copy_paste_command: bundledCliCommand("set")
+      },
+      {
+        id: "cli_remove",
+        title: "Remove a credential in Terminal",
+        do_this: "Only if they asked to remove a secret: show the Terminal remove command, then confirm with list_secrets.",
+        copy_paste_command: bundledCliCommand("remove")
+      },
       {
         id: "list_secrets",
         title: "List via MCP",
-        do_this: "After Terminal add, call list_secrets or vault_status (no values)."
-      },
-      {
-        id: "cli_menu",
-        title: "Interactive Terminal menu",
-        do_this: `Run ${bundledCliCommand("")} (no subcommand) for setup / unlock / add / remove / lock / status.`
+        do_this: "Call list_secrets or vault_status (names only \u2014 no values)."
       }
     ],
     advanced_escape_hatch: {
       title: "Contributor clone set (optional)",
       cli_command: CLI_SETUP_COMMANDS.set_from_clone_optional,
-      when: "Only when developing from a git clone."
+      when: "Only when developing from a git clone and they asked to add a secret."
     }
   };
 }
@@ -29771,9 +29778,9 @@ function buildOnboardingSteps(initialized, unlocked, session) {
       id: "store",
       phase: "4/4",
       title: "Save a credential",
-      done: false,
+      done: unlocked && session,
       tool: "cli_set",
-      user_action: unlocked ? `In Terminal run \`${CLI_SETUP_COMMANDS.plugin_set}\` \u2014 type name, then hidden value. Never in chat.` : "Unlock first, then save your token or password in Terminal."
+      user_action: unlocked && session ? void 0 : unlocked ? "Only if you need to add one: Terminal set (name + hidden value). Never in chat." : "Unlock first, then save your token or password in Terminal."
     },
     {
       id: "use",
@@ -29781,7 +29788,7 @@ function buildOnboardingSteps(initialized, unlocked, session) {
       title: "Use with your agent",
       done: false,
       tool: "inject_secret",
-      user_action: "Your agent uses the secret without showing it in the conversation."
+      user_action: unlocked && session ? "Vault ready \u2014 say which named secret to use (e.g. GITHUB_TOKEN). Prefer inject_secret; no CLI path dump." : "Your agent uses the secret without showing it in the conversation."
     }
   ];
 }
@@ -29822,10 +29829,10 @@ function recoveryGuidance(opts) {
     default:
       return {
         code: "ready",
-        howToFix: `Vault is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
+        howToFix: "Vault ready. Ask which named secret to use (e.g. GITHUB_TOKEN). Prefer list_secrets / inject_secret \u2014 show Terminal copy_paste_command only if they ask to add or remove.",
         what_to_do: [
-          `Run: ${bundledCliCommand("set")}`,
-          "Then list_secrets / inject_secret via MCP (no values in chat)."
+          "Ask for a secret name (e.g. GITHUB_TOKEN), then inject_secret / list_secrets.",
+          "Only if they ask to add/remove: show Terminal set/remove copy_paste_command."
         ]
       };
   }
@@ -29849,7 +29856,7 @@ function vaultOnboardTool(store, dataDir2) {
   const recovery = recoveryGuidance({ setup_state, initialized, dbExists });
   const progress = onboardingProgress(initialized, unlocked);
   const passphraseEnv = isPassphraseConfiguredInEnv();
-  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? passphraseEnv ? "Welcome to Password Space. Passphrase is in MCP Environment \u2014 call vault_init next." : "Welcome to Password Space. Next: open Terminal and run the setup command (hidden passphrase prompts)." : !unlocked || !session ? "Your vault already exists. Unlock in Terminal \u2014 do not create a new one." : "You're protected. Add a credential in Terminal whenever you're ready.";
+  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? passphraseEnv ? "Welcome to Password Space. Passphrase is in MCP Environment \u2014 call vault_init next." : "Welcome to Password Space. Next: open Terminal and run the setup command (hidden passphrase prompts)." : !unlocked || !session ? "Your vault already exists. Unlock in Terminal \u2014 do not create a new one." : "Vault ready. Ask which named secret to use (e.g. GITHUB_TOKEN) \u2014 no Terminal path dump.";
   return jsonResult({
     ok: prereq.ok,
     setup_state,
@@ -29869,8 +29876,8 @@ function vaultOnboardTool(store, dataDir2) {
     primary_action,
     recommended_path: primary_action.recommended_path ?? null,
     host_limitation: !passphraseEnv && (!initialized || !unlocked || !session) ? HOST_LIMITATION : void 0,
-    copy_paste_command: primary_action.copy_paste_command,
-    next_tool: primary_action.mcp_tool ?? (ready ? "vault_set_secret" : "vault_status"),
+    copy_paste_command: primary_action.copy_paste_command ?? null,
+    next_tool: primary_action.mcp_tool ?? (ready ? "inject_secret" : "vault_status"),
     recovery,
     what_to_do: [primary_action.do_this],
     never_paste_in_chat: ["passphrase", "secret values"],
@@ -29926,10 +29933,10 @@ function vaultStatusTool(store, dataDir2) {
       tool: s.tool,
       action: s.user_action
     })),
-    tip: !passphraseEnv && (!initialized || !unlocked) ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} / unlock). Optional: ${MCP_ENV_PATH}` : !passphraseEnv && initialized && unlocked ? `Add secrets in Terminal: ${bundledCliCommand("set")}` : void 0,
+    tip: !passphraseEnv && (!initialized || !unlocked) ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} / unlock). Optional: ${MCP_ENV_PATH}` : initialized && unlocked ? "Vault ready \u2014 ask for a named secret (e.g. GITHUB_TOKEN). Show Terminal copy_paste_command only if they ask to add/remove." : void 0,
     recommended_path: primary_action.recommended_path ?? null,
     host_limitation: !passphraseEnv && (!initialized || !unlocked) ? HOST_LIMITATION : void 0,
-    copy_paste_command: primary_action.copy_paste_command
+    copy_paste_command: primary_action.copy_paste_command ?? null
   });
 }
 async function vaultInitTool(store, dataDir2, args) {
@@ -30032,6 +30039,7 @@ function vaultManagerTool(store, dataDir2) {
   const parsed = JSON.parse(status.content[0].text);
   const secrets = store.isUnlocked && store.isInitialized() ? store.listSecrets().map(publicMeta) : [];
   const needsPassphraseChannel = !isPassphraseConfiguredInEnv() && (!store.isInitialized() || !store.isUnlocked);
+  const vaultReady = store.isInitialized() && store.isUnlocked;
   const cliCommand = store.isInitialized() ? bundledCliCommand("unlock") : bundledCliCommand("setup");
   return jsonResult({
     ok: true,
@@ -30041,18 +30049,20 @@ function vaultManagerTool(store, dataDir2) {
     resource_mime_hint: "text/html;profile=mcp-app",
     progressive_enhancement: "Status-only. Do not guide users to App forms for create/unlock/add. Human UX is the plugin Terminal CLI.",
     apps_ui_expected: false,
-    agent_contract: "Do not call vault_manager for setup. Show Terminal copy_paste_command instead. Use list_secrets / inject_secret / vault_lock after unlock. Never paste App HTML/JS into chat.",
+    agent_contract: vaultReady ? "Vault ready. Ask which named secret to use; prefer list_secrets / inject_secret / vault_lock. Show Terminal copy_paste_command only for add/remove. Never paste App HTML/JS into chat." : "Do not call vault_manager for setup. Show Terminal copy_paste_command for create/unlock. Never paste App HTML/JS into chat.",
     apps_fallback: {
-      reason: "Human setup/credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms.",
-      recommended_path: needsPassphraseChannel ? store.isInitialized() ? "cli_unlock" : "cli_setup" : "cli_set",
-      next_tool: needsPassphraseChannel ? store.isInitialized() ? "cli_unlock" : "cli_setup" : "cli_set",
-      copy_paste_command: needsPassphraseChannel ? cliCommand : bundledCliCommand("set"),
+      reason: needsPassphraseChannel ? "Human setup/credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms." : "Vault ready \u2014 ask for a named secret (e.g. GITHUB_TOKEN). Terminal copy_paste_command only if they ask to add/remove.",
+      recommended_path: needsPassphraseChannel ? store.isInitialized() ? "cli_unlock" : "cli_setup" : "ready",
+      next_tool: needsPassphraseChannel ? store.isInitialized() ? "cli_unlock" : "cli_setup" : "inject_secret",
+      copy_paste_command: needsPassphraseChannel ? cliCommand : null,
+      add_or_remove_command: vaultReady ? bundledCliCommand("set") : void 0,
       mcp_env_alternative: MCP_ENV_PATH,
       never: [
         "Guide users to Vault Manager / App forms for create, unlock, or add",
         "Paste vault-manager.html / minified JS into chat",
         "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
-        "Call vault_init with empty {}"
+        "Call vault_init with empty {}",
+        "Re-dump long Terminal CLI paths every turn when vault is ready"
       ]
     },
     host_limitation: needsPassphraseChannel ? HOST_LIMITATION : void 0,
