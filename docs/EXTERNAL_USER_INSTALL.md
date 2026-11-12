@@ -9,12 +9,12 @@ Encrypted vault on your Mac. Your agent uses tokens without pasting them into th
 | Can | Cannot |
 | --- | --- |
 | Guide you with `/setup-password-space` | Read your mind for a passphrase |
-| Open Vault Manager and run tools when you approve them | Set up an encrypted vault with **zero** input from you |
+| Show a Terminal command and run MCP tools when you approve them | Set up an encrypted vault with **zero** input from you |
 | Keep secrets out of chat after setup | Invent a passphrase for you |
 
-**You choose a passphrase once.** That is required for encryption — there is no silent auto-setup.
+**You choose a passphrase once** in Terminal. That is required for encryption — there is no silent auto-setup.
 
-Some Cursor builds approve `vault_init` with empty `{}` and **no passphrase field**. Password Space steers you to **Vault Manager**, a **visible approval-form field**, or optional **MCP Environment** — not Terminal as the default.
+Some Cursor builds approve `vault_init` with empty `{}` and **no passphrase field**. Password Space steers you to **Terminal** (or optional **MCP Environment**) — not MCP App forms as the default.
 
 ## Easiest path (3 steps)
 
@@ -27,25 +27,31 @@ Some Cursor builds approve `vault_init` with empty `{}` and **no passphrase fiel
 
 Requires **Node.js 20+** on your Mac (`node -v`). The plugin MCP uses Node's built-in SQLite.
 
-### 2. Create your vault (UI / chat)
+### 2. Create your vault (Terminal)
 
 1. In chat: **`/setup-password-space`**
 2. Agent calls **`vault_onboard`** → follow the single **`primary_action`**
-3. Default: agent opens **`vault_manager`** — create your vault in the App UI
-4. If no App UI appears: type your passphrase (8+ characters) in the **MCP approval form** when the agent calls `vault_init` / `vault_unlock`
+3. Open **Terminal** and paste **`copy_paste_command`** (typically from a clone: `pnpm password-space setup`)
+4. Type your passphrase at the **hidden** prompts (8+ characters)
 
 Do **not** approve empty `{}` in Cursor.
 
-#### Optional: MCP Environment (skip empty-form pain)
+#### Optional: MCP Environment (skip Terminal passphrase)
 
 **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (8+ chars, never in chat), then approve `vault_init` / `vault_unlock` with `{}`.
 
-You do **not** edit `mcp.json`. You do **not** need to understand MCP. You do **not** need Terminal for day-1 setup.
+You do **not** edit `mcp.json`. You do **not** need to understand MCP. Vault home defaults to `~/.password-space` (no Configure UI).
 
-### 3. Use
+### 3. Add a secret + use
 
-- Save: **Vault Manager** or **`vault_set_secret`** (name + value in approval form only)
+```bash
+# From your password-space clone (after pnpm install && pnpm build):
+pnpm password-space set
+# prompts: Secret name → Value for NAME (hidden)
+```
+
 - Agent access: **`inject_secret`**
+- Status / list: **`vault_status`** / **`list_secrets`**
 - Done for the day: **`vault_lock`**
 
 ## Troubleshooting
@@ -53,11 +59,10 @@ You do **not** edit `mcp.json`. You do **not** need to understand MCP. You do **
 | Problem | Fix |
 | --- | --- |
 | Node too old / MCP won't start | Install Node **20+**, reload Cursor, run `/setup-password-space` again |
-| `passphrase_missing` / empty `{}` | **Stop retrying.** Open Vault Manager, use a visible approval field, or set `PASSWORD_SPACE_PASSPHRASE` |
-| Agent says reply "ready" then vault_init | Outdated skill — follow `primary_action` (`vault_manager` first) |
-| "Vault already initialized" | Unlock via Vault Manager / `vault_unlock` — do not re-init |
-| "Vault locked" after restart | Vault Manager unlock, or MCP Environment + `vault_unlock` |
-| Vault Manager shows JSON only | Host lacks MCP Apps — use approval-form `vault_init` / `vault_unlock` or MCP Environment |
+| `passphrase_missing` / empty `{}` | **Stop retrying.** Run the Terminal `copy_paste_command`, or set `PASSWORD_SPACE_PASSPHRASE` |
+| Agent says reply "ready" then vault_init | Outdated skill — follow `primary_action` (Terminal first) |
+| "Vault already initialized" | Unlock via Terminal `pnpm password-space unlock` — do not re-init |
+| "Vault locked" after restart | Terminal unlock, or MCP Environment + `vault_unlock` |
 | Mid-setup interruption | Run **`/setup-password-space`** again — `vault_onboard` resumes from current state |
 | Reinstall plugin | [FRESH_INSTALL_VERIFY.md](./FRESH_INSTALL_VERIFY.md) |
 
@@ -65,8 +70,8 @@ You do **not** edit `mcp.json`. You do **not** need to understand MCP. You do **
 
 - Data stays in `~/.password-space` on your device
 - Uninstalling the plugin does **not** delete your vault unless you remove that folder
-- Passphrase is never collected via MCP elicitation (sensitive data stays in App form / env / approval args when a field exists)
+- Passphrase and secret values are never collected via MCP elicitation
 
 More: [zero-friction-v1.md](./zero-friction-v1.md) · [onboarding.md](./onboarding.md) · [SECURITY.md](../SECURITY.md)
 
-Power-user Terminal CLI (not required for onboarding): see the **CLI appendix** in the [root README](../README.md).
+CLI details: see the [root README](../README.md).

@@ -23,7 +23,7 @@ Password Space keeps **ciphertext on disk**, an **explicit unlock** gate, and an
 | Encrypted local storage | Secrets in SQLite (`vault.db`), AES-256-GCM under a passphrase-wrapped vault key |
 | Explicit unlock | `vault_unlock` (MCP) or CLI `unlock` before tools can use the vault; `vault_lock` / `lock` clears the session |
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
-| Day-1 MCP setup | `vault_status`, `vault_init`, `vault_unlock`, `vault_lock`, `vault_set_secret` — no clone/`pnpm` required after plugin install |
+| Day-1 Terminal + MCP | Terminal `setup` / `set` for passphrase and secrets; MCP `vault_status`, `list_secrets`, `inject_secret`, `vault_lock` after unlock |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
 | Session TTL | Unlock session expires (default **8 hours**); expired sessions are rejected and cleared |
 | Redaction hook | Optional `beforeSubmitPrompt` hook strips **known** inject values from outbound prompts |
@@ -56,46 +56,41 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 | Package manager | **pnpm** 9.x — **optional**; only for CLI / developing this repo |
 | OS | Developed and verified on **macOS**; should run anywhere Node 20 + `node:sqlite` works — treat Linux/Windows as **best-effort** until listed here as tested |
 
-## Quickstart (Cursor plugin — primary)
+## Quickstart (Cursor plugin + Terminal)
 
 **[External user install](./docs/EXTERNAL_USER_INSTALL.md)** · **[Getting started in 2 minutes](./docs/onboarding.md)**
-
-Day-1 setup does **not** require `git clone` or `pnpm`.
 
 1. Open **Cursor Settings → Customize** (or **Dashboard → Plugins & MCPs** for team marketplaces).
 2. **+ Add Marketplace** → **Import from GitHub**.
 3. Paste: `https://github.com/vishnutvm/password-space`
-4. Install the **password-space** plugin.
-5. Optional custom vault path: **Plugins → password-space → Configure** → **Password Space home** (leave blank for `~/.password-space`). You can also set a **real** absolute `PASSWORD_SPACE_HOME` in the process environment or MCP `env`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default.
-6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`** and walk you through the checklist.
-
-7. **Default:** follow `primary_action` — open **Vault Manager** (`vault_manager`), then create/unlock in the App UI or type the passphrase in a visible MCP approval form. Approving empty `{}` fails with `passphrase_missing`.
-
-8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}` — skips empty-form pain.
+4. Install the **password-space** plugin and reload Cursor.
+5. Vault home defaults to **`~/.password-space`**. Optional override: a **real** absolute `PASSWORD_SPACE_HOME` in the process environment or MCP `env`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default. There is **no** Plugins → Configure UI for this.
+6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`**.
+7. **Default:** follow `primary_action` — open **Terminal** and run `copy_paste_command` (`pnpm password-space setup` / `unlock` / `set`). Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`.
+8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}`.
 
 ```text
-vault_onboard → vault_manager → vault_init / vault_unlock (App or approval form) → vault_set_secret → inject_secret
+vault_onboard → Terminal: setup → Terminal: set → vault_status / list_secrets → inject_secret
 # optional: MCP Environment PASSWORD_SPACE_PASSPHRASE → vault_init {} → vault_unlock {}
 ```
 
-Pass **passphrase** and **secret values** only via Vault Manager App, MCP Environment, or a visible approval-form field — **never** in chat. Terminal CLI is a power-user appendix, not onboarding.
+Pass **passphrase** and **secret name + value** in **Terminal** — **never** in chat. MCP tools handle status / list / inject / lock after unlock. Vault Manager is optional status UI only.
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
 Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/`.
 
-## CLI appendix (power users only — not onboarding)
-
-Day-1 setup does **not** need these commands. Prefer `/setup-password-space` → Vault Manager.
+## CLI (create / unlock / add — primary path)
 
 ```bash
 git clone https://github.com/vishnutvm/password-space.git
 cd password-space
 pnpm install && pnpm build
 
-pnpm password-space init          # interactive passphrase (min 8 chars)
+pnpm password-space setup         # create + unlock (hidden passphrase)
 pnpm password-space unlock        # writes session file
-pnpm password-space set GITHUB_TOKEN --tags api,github   # prompts for value on a TTY
+pnpm password-space set           # prompts for name, then hidden value
+pnpm password-space set GITHUB_TOKEN --tags api,github
 pnpm password-space list          # names / tags only
 pnpm password-space status
 pnpm password-space lock
@@ -105,8 +100,8 @@ pnpm password-space lock
 
 | Input | When |
 | --- | --- |
-| Interactive hidden prompt | TTY and no `--value` |
-| stdin (one value) | Non-TTY (pipes) |
+| Interactive name + hidden value | TTY, no name arg and/or no `--value` |
+| stdin (one value) | Non-TTY (pipes) with name on argv |
 | `--value <text>` | Explicit flag (avoid in shell history for real secrets) |
 
 Prefer piping from a protected source rather than putting a real token on the command line:
@@ -150,7 +145,7 @@ Without the marketplace, point Cursor (or another MCP client) at the **bundled**
 }
 ```
 
-`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`. Marketplace installs can set it via **Plugins → Configure → Password Space home**. If you override in MCP `env`, use a concrete absolute path only (never an unresolved `${PASSWORD_SPACE_HOME}` placeholder).
+`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`. If you override in MCP `env`, use a concrete absolute path only (never an unresolved `${PASSWORD_SPACE_HOME}` placeholder).
 
 Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugins/password-space/skills/password-space/`. Hooks: `plugins/password-space/hooks/hooks.json`.
 

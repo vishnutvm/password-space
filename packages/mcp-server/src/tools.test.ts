@@ -136,27 +136,32 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.setup_state).toBe("needs_init");
     expect(parsed.prerequisites.node_ok).toBe(true);
     expect(parsed.prerequisites.required_node).toBe(`>=${MIN_NODE_MAJOR}`);
-    expect(parsed.primary_action.id).toBe("vault_manager");
-    expect(parsed.recommended_path).toBe("vault_manager");
+    expect(parsed.primary_action.id).toBe("cli_setup");
+    expect(parsed.recommended_path).toBe("cli_setup");
     expect(parsed.host_limitation).toMatch(/empty \{\}/i);
-    expect(parsed.next).toMatch(/vault_manager/i);
-    expect(parsed.primary_action.copy_paste_command).toBeUndefined();
-    expect(parsed.next_steps.some((s) => s.tool === "vault_manager")).toBe(true);
+    expect(parsed.next).toMatch(/Terminal|copy_paste|setup/i);
+    expect(parsed.primary_action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.from_clone);
+    expect(parsed.next_steps.some((s) => s.tool === "cli_setup")).toBe(true);
     store.close();
   });
 
-  it("buildPrimaryAction prefers vault_manager when vault missing and no env", () => {
+  it("buildPrimaryAction prefers cli_setup when vault missing and no env", () => {
     const action = buildPrimaryAction(false, false, false);
-    expect(action.id).toBe("vault_manager");
-    expect(action.recommended_path).toBe("vault_manager");
-    expect(action.mcp_tool).toBe("vault_manager");
-    expect(action.copy_paste_command).toBeUndefined();
+    expect(action.id).toBe("cli_setup");
+    expect(action.recommended_path).toBe("cli_setup");
+    expect(action.mcp_tool).toBeUndefined();
+    expect(action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.from_clone);
     expect(action.host_limitation).toMatch(/empty \{\}/i);
     expect(action.never).toMatch(/ready/i);
-    expect(action.alternatives?.some((a) => a.id === "mcp_form")).toBe(true);
     expect(action.alternatives?.some((a) => a.id === "mcp_env")).toBe(true);
-    expect(action.advanced_escape_hatch?.cli_command).toBe(CLI_SETUP_COMMANDS.from_clone);
-    expect(action.advanced_escape_hatch?.when).toMatch(/asks for Terminal/i);
+    expect(action.advanced_escape_hatch?.cli_command).toBe(CLI_SETUP_COMMANDS.global_cli);
+  });
+
+  it("buildPrimaryAction prefers cli_set when vault ready", () => {
+    const action = buildPrimaryAction(true, true, true);
+    expect(action.id).toBe("cli_set");
+    expect(action.recommended_path).toBe("cli_set");
+    expect(action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.set_from_clone);
   });
 
   it("buildPrimaryAction prefers vault_init_env when PASSWORD_SPACE_PASSPHRASE set", () => {
@@ -182,7 +187,7 @@ describe("vault lifecycle MCP tools", () => {
     expect(good.ok).toBe(true);
   });
 
-  it("vault_onboard returns vault_manager primary_action for newcomers", () => {
+  it("vault_onboard returns cli_setup primary_action for newcomers", () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     const result = vaultOnboardTool(store, dir);
@@ -211,26 +216,25 @@ describe("vault lifecycle MCP tools", () => {
     };
     expect(parsed.checklist.length).toBeGreaterThan(3);
     expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
-    expect(parsed.human_summary).toMatch(/Vault Manager|Welcome|Password Space/i);
+    expect(parsed.human_summary).toMatch(/Terminal|Welcome|Password Space/i);
     expect(parsed.progress.phase).toMatch(/\d\/4/);
     expect(parsed.trust_line).toMatch(/encrypted/i);
     expect(parsed.setup_state).toBe("needs_init");
-    expect(parsed.primary_action.id).toBe("vault_manager");
-    expect(parsed.recommended_path).toBe("vault_manager");
-    expect(parsed.primary_action.mcp_tool).toBe("vault_manager");
+    expect(parsed.primary_action.id).toBe("cli_setup");
+    expect(parsed.recommended_path).toBe("cli_setup");
+    expect(parsed.primary_action.mcp_tool).toBeUndefined();
     expect(parsed.host_limitation).toMatch(/empty \{\}/i);
-    expect(parsed.copy_paste_command).toBeUndefined();
-    expect(parsed.primary_action.do_this).toMatch(/vault_manager/i);
-    expect(parsed.primary_action.advanced_escape_hatch?.when).toMatch(/asks for Terminal/i);
+    expect(parsed.copy_paste_command).toBe(CLI_SETUP_COMMANDS.from_clone);
+    expect(parsed.primary_action.do_this).toMatch(/Terminal|copy_paste/i);
     expect(parsed.what_to_do).toHaveLength(1);
     expect(parsed.never_do.some((n) => /ready/i.test(n))).toBe(true);
     expect(parsed.elicitation_note).toMatch(/never via MCP elicitation/i);
     expect(parsed.never_edit).toContain("mcp.json");
-    expect(parsed.recovery.howToFix).toMatch(/vault_manager|vault_init|PASSWORD_SPACE_PASSPHRASE/i);
+    expect(parsed.recovery.howToFix).toMatch(/Terminal|password-space setup/i);
     store.close();
   });
 
-  it("vault_onboard guides vault_manager unlock when vault already exists", async () => {
+  it("vault_onboard guides cli_unlock when vault already exists", async () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     await store.init("existing-vault-pass");
@@ -244,23 +248,23 @@ describe("vault lifecycle MCP tools", () => {
       human_summary: string;
     };
     expect(parsed.setup_state).toBe("needs_unlock");
-    expect(parsed.primary_action.id).toBe("vault_manager");
-    expect(parsed.recommended_path).toBe("vault_manager");
-    expect(parsed.primary_action.mcp_tool).toBe("vault_manager");
-    expect(parsed.primary_action.copy_paste_command).toBeUndefined();
+    expect(parsed.primary_action.id).toBe("cli_unlock");
+    expect(parsed.recommended_path).toBe("cli_unlock");
+    expect(parsed.primary_action.mcp_tool).toBeUndefined();
+    expect(parsed.primary_action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.unlock_from_clone);
     expect(parsed.recovery.code).toBe("vault_locked");
     expect(parsed.recovery.howToFix).toMatch(/do not run vault_init/i);
     expect(parsed.human_summary).toMatch(/already exists/i);
     store.close();
   });
 
-  it("PassphraseRequiredError carries host_limitation and vault_manager path", () => {
+  it("PassphraseRequiredError carries host_limitation and cli_setup path", () => {
     const err = new PassphraseRequiredError();
     expect(err.code).toBe("passphrase_missing");
-    expect(err.recommended_path).toBe("vault_manager");
+    expect(err.recommended_path).toBe("cli_setup");
     expect(err.host_limitation).toMatch(/empty \{\}/i);
     expect(err.message).toMatch(/empty \{\}/i);
-    expect(err.message).toMatch(/vault_manager/i);
+    expect(err.message).toMatch(/Terminal|password-space setup/i);
   });
 
   it("vault_init → unlock → set_secret without leaking secrets", async () => {
@@ -342,7 +346,7 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.app).toBe("vault-manager");
     expect(parsed.ui_resource).toMatch(/^ui:\/\//);
     expect(parsed.apps_ui_expected).toBe(true);
-    expect(parsed.apps_fallback.recommended_path).toBe("mcp_tools");
+    expect(parsed.apps_fallback.recommended_path).toBe("cli_set");
     expect(parsed.agent_contract).toMatch(/Do not fetch or paste/i);
     expect(parsed.apps_fallback.never?.join(" ")).toMatch(/vault-manager\.html/i);
     expect(result.content[0]!.text).not.toMatch(/<!DOCTYPE html>/i);
@@ -353,7 +357,7 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
   });
 
-  it("vault_manager apps_fallback recommends mcp_form when vault missing", () => {
+  it("vault_manager apps_fallback recommends cli_setup when vault missing", () => {
     const dir = tempDir();
     const store = new VaultStore(join(dir, "vault.db"));
     const result = vaultManagerTool(store, dir);
@@ -365,9 +369,9 @@ describe("vault lifecycle MCP tools", () => {
       };
       host_limitation?: string;
     };
-    expect(parsed.apps_fallback.recommended_path).toBe("mcp_form");
-    expect(parsed.apps_fallback.next_tool).toBe("vault_init");
-    expect(parsed.apps_fallback.never?.join(" ")).toMatch(/Terminal CLI/i);
+    expect(parsed.apps_fallback.recommended_path).toBe("cli_setup");
+    expect(parsed.apps_fallback.next_tool).toBe("cli_setup");
+    expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
     expect(parsed.host_limitation).toMatch(/empty \{\}/i);
     store.close();
   });
@@ -431,9 +435,9 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toMatch(/already initialized/i);
     expect(parsed.code).toBe("vault_already_exists");
-    expect(parsed.howToFix).toMatch(/vault_manager|vault_unlock|MCP Environment|unlock/i);
-    expect(parsed.primary_action.id).toBe("vault_manager");
-    expect(parsed.recommended_path).toBe("vault_manager");
+    expect(parsed.howToFix).toMatch(/Terminal|unlock|MCP Environment/i);
+    expect(parsed.primary_action.id).toBe("cli_unlock");
+    expect(parsed.recommended_path).toBe("cli_unlock");
     store.close();
   });
 });
