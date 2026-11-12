@@ -220,9 +220,10 @@ Password Space — setup
     console.log(`✓ Unlocked until ${expiresAt}`);
   }
 
+  const self = process.argv[1] ? `node "${process.argv[1]}"` : "password-space";
   console.log(`
 Done. Next (still in Terminal — never paste values in Cursor chat):
-  pnpm password-space set
+  ${self} set
   # prompts for name, then hidden value
 
 Back in Cursor:
@@ -257,21 +258,22 @@ async function main(): Promise<void> {
 
         if (!initialized) {
           console.log("Password Space — next step\n");
-          console.log("  Recommended (Terminal — hidden passphrase prompts):");
-          console.log("    password-space setup");
-          console.log("    or: pnpm password-space setup   (from a clone)");
+          console.log("  Recommended (plugin Terminal CLI — hidden passphrase prompts):");
+          console.log('    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup');
+          console.log("    (or this binary: password-space setup)");
           console.log("\n  One-click alternative:");
           console.log("    Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE");
           console.log("    then vault_init {} in Cursor");
           console.log("\n  Avoid: approving vault_init with empty {} when no passphrase field is shown.");
+          console.log("  Contributors only: pnpm password-space setup from a clone.");
           break;
         }
         if (!unlocked || !session) {
-          console.log("Next: password-space unlock");
+          console.log('Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" unlock');
           console.log("  Or: set PASSWORD_SPACE_PASSPHRASE in MCP Environment, then vault_unlock {}");
           break;
         }
-        console.log("Vault ready. Next: password-space set   (prompts for name + hidden value)");
+        console.log('Vault ready. Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
         console.log("  Then in Cursor: vault_status / list_secrets / inject_secret");
         break;
       }
