@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Bundle the MCP server (+ vault + deps) into plugins/password-space/dist/index.js
- * and the Vault Manager MCP App HTML into plugins/password-space/dist/vault-manager.html
- * so marketplace installs can run with Node only (no pnpm required for MCP).
+ * Bundle the MCP server (+ vault + deps) into plugins/password-space/dist/index.js,
+ * the Terminal CLI into plugins/password-space/dist/cli.js, and the Vault Manager
+ * MCP App HTML into plugins/password-space/dist/vault-manager.html so marketplace
+ * installs can run with Node only (no pnpm / no repo clone for MCP or Terminal setup).
  */
 import * as esbuild from "esbuild";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -13,26 +14,40 @@ import { inlineVaultManagerHtml } from "./vault-manager-html.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "plugins/password-space/dist");
-const outfile = join(outDir, "index.js");
+const mcpOut = join(outDir, "index.js");
+const cliOut = join(outDir, "cli.js");
 const appHtmlOut = join(outDir, "vault-manager.html");
 const require = createRequire(import.meta.url);
 
 mkdirSync(outDir, { recursive: true });
 
-await esbuild.build({
-  entryPoints: [join(root, "packages/mcp-server/src/index.ts")],
+const shared = {
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node20",
-  outfile,
-  // Source already has a shebang; do not double it (breaks ESM parse).
   packages: "bundle",
   sourcemap: true,
   logLevel: "info",
+};
+
+await esbuild.build({
+  ...shared,
+  entryPoints: [join(root, "packages/mcp-server/src/index.ts")],
+  outfile: mcpOut,
+  // Source already has a shebang; do not double it (breaks ESM parse).
 });
 
-console.log(`bundled → ${outfile}`);
+console.log(`bundled → ${mcpOut}`);
+
+await esbuild.build({
+  ...shared,
+  entryPoints: [join(root, "packages/cli/src/index.ts")],
+  outfile: cliOut,
+  // CLI source includes #!/usr/bin/env node — preserved for direct execution.
+});
+
+console.log(`bundled → ${cliOut}`);
 
 // --- Vault Manager App (single-file HTML for MCP Apps progressive enhancement) ---
 const uiEntry = join(root, "packages/mcp-server/src/app/vault-manager-ui.ts");

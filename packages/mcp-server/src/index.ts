@@ -3,8 +3,9 @@
  * Password Space MCP server (stdio).
  *
  * Bundled for marketplace installs (`plugins/password-space/dist/index.js`).
- * End users can init / unlock / store secrets via these tools — no separate
- * monorepo clone required for day-1 setup. Prefer inject_secret over resolve_secret.
+ * End users can init / unlock / store secrets via Terminal CLI bundled at
+ * `dist/cli.js` (sibling of this file) — no monorepo clone required.
+ * Prefer inject_secret over resolve_secret.
  *
  * Never log passphrases or secret values.
  */
@@ -22,6 +23,7 @@ import { z } from "zod";
 import { defaultDataDir } from "@password-space/vault";
 import {
   CLI_SETUP_COMMANDS,
+  bundledCliCommand,
   HOST_LIMITATION,
   MCP_ENV_PATH,
   NodeVersionError,
@@ -232,7 +234,7 @@ registerAppTool(
   {
     title: "Open Vault Manager",
     description:
-      "Optional Password Space Vault Manager status UI (Cursor MCP Apps 2.6+). Primary create/unlock/add is Terminal CLI (`pnpm password-space setup|unlock|set`). Prefer list_secrets / inject_secret / vault_lock after unlock. Do not vault_init with empty {}.",
+      "Optional Password Space Vault Manager status UI (Cursor MCP Apps 2.6+). Primary create/unlock/add is the plugin-bundled Terminal CLI (`node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup|unlock|set`). Prefer list_secrets / inject_secret / vault_lock after unlock. Do not vault_init with empty {}.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },
@@ -406,14 +408,14 @@ function errorResult(err: unknown) {
     payload.code = err.code;
     payload.host_limitation = err.host_limitation;
     payload.recommended_path = err.recommended_path;
-    payload.copy_paste_command = CLI_SETUP_COMMANDS.from_clone;
+    payload.copy_paste_command = bundledCliCommand("setup");
     payload.copy_paste_commands = CLI_SETUP_COMMANDS;
     payload.howToFix =
-      "Stop retrying vault_init/unlock with empty {}. Run Terminal CLI setup (copy_paste_command) or set PASSWORD_SPACE_PASSPHRASE in MCP Environment.";
+      "Stop retrying vault_init/unlock with empty {}. Run the plugin-bundled Terminal CLI (copy_paste_command) or set PASSWORD_SPACE_PASSPHRASE in MCP Environment. No repo clone needed.";
     payload.what_happened =
       "Cursor approved the tool with empty {} — no passphrase was provided (common host limitation).";
     payload.what_to_do = [
-      `Recommended: ${CLI_SETUP_COMMANDS.from_clone}`,
+      `Recommended: ${bundledCliCommand("setup")}`,
       `Or: ${MCP_ENV_PATH}`,
       "Vault Manager is optional status UI only — prefer Terminal for create/unlock/add.",
       "Do not ask the user to reply \"ready\" then call vault_init again without a passphrase channel.",
@@ -431,15 +433,15 @@ function errorResult(err: unknown) {
     payload.howToFix =
       "That passphrase did not unlock the vault. Retry carefully via Terminal unlock or MCP Environment — there is no recovery without the correct passphrase.";
   } else if (/locked/i.test(message)) {
-    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.unlock_from_clone}\` or set PASSWORD_SPACE_PASSPHRASE then vault_unlock.`;
+    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_unlock}\` or set PASSWORD_SPACE_PASSPHRASE then vault_unlock.`;
     payload.host_limitation = HOST_LIMITATION;
     payload.recommended_path = "cli_unlock";
-    payload.copy_paste_command = CLI_SETUP_COMMANDS.unlock_from_clone;
+    payload.copy_paste_command = bundledCliCommand("unlock");
   } else if (/not set up|not initialized/i.test(message)) {
-    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.from_clone}\` or /setup-password-space and follow primary_action (Terminal-first).`;
+    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_setup}\` or /setup-password-space and follow primary_action (Terminal-first; no clone).`;
     payload.host_limitation = HOST_LIMITATION;
     payload.recommended_path = "cli_setup";
-    payload.copy_paste_command = CLI_SETUP_COMMANDS.from_clone;
+    payload.copy_paste_command = bundledCliCommand("setup");
   }
 
   return {

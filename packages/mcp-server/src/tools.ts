@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   VaultStore,
   changeVaultPassphrase,
@@ -40,22 +42,75 @@ function jsonResult(
 export const HOST_LIMITATION =
   "This Cursor host may approve MCP tools with empty {} and no passphrase field (or without rendering MCP Apps UI). Do not loop vault_init — use Terminal CLI setup or MCP Environment.";
 
-/** Exact Mac Terminal commands — primary create / unlock / add path. */
+/** Bundled CLI path inside the marketplace plugin package (next to MCP `dist/index.js`). */
+export const BUNDLED_CLI_RELATIVE = "dist/cli.js";
+
+/**
+ * Portable Terminal form after marketplace install + Reload.
+ * Cursor expands CURSOR_PLUGIN_ROOT for MCP; agents should prefer the absolute
+ * path from `bundledCliCommand()` when the MCP process can resolve `cli.js`.
+ */
+export const BUNDLED_CLI_NODE =
+  `node "\${CURSOR_PLUGIN_ROOT}/${BUNDLED_CLI_RELATIVE}"` as const;
+
+/**
+ * Exact Terminal commands — primary create / unlock / add path.
+ * No repo clone required: CLI ships in the plugin at `dist/cli.js`.
+ */
 export const CLI_SETUP_COMMANDS = {
-  from_clone:
-    "cd ~/Shajipapan/Personal/Projects/password-space && pnpm password-space setup",
-  from_clone_generic:
+  /** Preferred after plugin install (no clone). */
+  plugin_setup: `${BUNDLED_CLI_NODE} setup`,
+  plugin_unlock: `${BUNDLED_CLI_NODE} unlock`,
+  plugin_set: `${BUNDLED_CLI_NODE} set`,
+  /** Optional: contributors developing from a clone. */
+  from_clone_optional:
     "cd /path/to/password-space && pnpm install && pnpm build && pnpm password-space setup",
-  global_cli: "password-space setup",
-  unlock_from_clone:
-    "cd ~/Shajipapan/Personal/Projects/password-space && pnpm password-space unlock",
-  unlock_global: "password-space unlock",
-  set_from_clone:
-    "cd ~/Shajipapan/Personal/Projects/password-space && pnpm password-space set",
-  set_from_clone_generic:
+  unlock_from_clone_optional:
+    "cd /path/to/password-space && pnpm password-space unlock",
+  set_from_clone_optional:
     "cd /path/to/password-space && pnpm password-space set",
+  global_cli: "password-space setup",
+  unlock_global: "password-space unlock",
   set_global: "password-space set",
 } as const;
+
+/**
+ * Absolute path to bundled `cli.js` when the MCP server is the marketplace
+ * bundle (`…/plugins/password-space/dist/index.js`) or CURSOR_PLUGIN_ROOT is set.
+ */
+export function resolveBundledCliPath(): string | undefined {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sibling = join(here, "cli.js");
+    if (existsSync(sibling)) return sibling;
+  } catch {
+    // import.meta.url unavailable in unusual hosts — fall through
+  }
+  const root = process.env.CURSOR_PLUGIN_ROOT?.trim();
+  if (root && !root.includes("${")) {
+    const fromEnv = join(root, BUNDLED_CLI_RELATIVE);
+    if (existsSync(fromEnv)) return fromEnv;
+  }
+  return undefined;
+}
+
+function shellQuote(path: string): string {
+  // Double-quote for Terminal paste; escape embedded quotes/backslashes only.
+  return `"${path.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Terminal command for setup | unlock | set using the plugin-bundled CLI.
+ * Prefers an absolute path (paste-ready in Terminal); falls back to
+ * `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" …`.
+ */
+export function bundledCliCommand(
+  subcommand: "setup" | "unlock" | "set" | string,
+): string {
+  const abs = resolveBundledCliPath();
+  if (abs) return `node ${shellQuote(abs)} ${subcommand}`;
+  return `${BUNDLED_CLI_NODE} ${subcommand}`;
+}
 
 export const MCP_ENV_PATH =
   "Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE (8+ chars), then call vault_init / vault_unlock with empty {}.";
@@ -67,7 +122,7 @@ export class PassphraseRequiredError extends Error {
 
   constructor() {
     super(
-      "Passphrase missing: Cursor approved with empty {}. Use Terminal `pnpm password-space setup` (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment) — do not retry vault_init with empty {}.",
+      `Passphrase missing: Cursor approved with empty {}. Use Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment) — do not retry vault_init with empty {}.`,
     );
     this.name = "PassphraseRequiredError";
   }
@@ -279,8 +334,8 @@ export function buildPrimaryAction(
         recommended_path: "mcp_env",
         never: "Never paste the passphrase into chat.",
         advanced_escape_hatch: {
-          title: "Terminal setup",
-          cli_command: CLI_SETUP_COMMANDS.global_cli,
+          title: "Plugin Terminal CLI",
+          cli_command: bundledCliCommand("setup"),
           when: "If vault_init still fails after env is set.",
         },
       };
@@ -290,10 +345,10 @@ export function buildPrimaryAction(
       id: "cli_setup",
       title: "Create your vault in Terminal",
       do_this:
-        "Open Terminal and run the copy_paste_command below (hidden passphrase prompts). Do NOT call vault_init without a passphrase, and never ask the user to reply \"ready\" then approve empty {}.",
+        "Open Terminal and run the copy_paste_command below (hidden passphrase prompts). No repo clone needed — the CLI is bundled in the plugin. Do NOT call vault_init without a passphrase, and never ask the user to reply \"ready\" then approve empty {}.",
       recommended_path: "cli_setup",
       host_limitation: HOST_LIMITATION,
-      copy_paste_command: CLI_SETUP_COMMANDS.from_clone,
+      copy_paste_command: bundledCliCommand("setup"),
       never:
         "Never call vault_init with empty {}. Never ask the user to reply \"ready\" then approve without a passphrase field. Never paste the passphrase into chat. Never collect passphrase or secret values in Vault Manager App forms or MCP approval forms when Terminal is available.",
       alternatives: [
@@ -310,9 +365,9 @@ export function buildPrimaryAction(
         },
       ],
       advanced_escape_hatch: {
-        title: "Global CLI (if installed)",
-        cli_command: CLI_SETUP_COMMANDS.global_cli,
-        when: "After `pnpm link --global` / npm install -g of the CLI package.",
+        title: "Contributor clone (optional)",
+        cli_command: CLI_SETUP_COMMANDS.from_clone_optional,
+        when: "Only if developing Password Space from a git clone — not required for external users.",
       },
     };
   }
@@ -326,8 +381,8 @@ export function buildPrimaryAction(
         recommended_path: "mcp_env",
         never: "Never paste the passphrase into chat.",
         advanced_escape_hatch: {
-          title: "Terminal unlock",
-          cli_command: CLI_SETUP_COMMANDS.unlock_global,
+          title: "Plugin Terminal unlock",
+          cli_command: bundledCliCommand("unlock"),
           when: "If vault_unlock still fails after env is set.",
         },
       };
@@ -336,10 +391,10 @@ export function buildPrimaryAction(
       id: "cli_unlock",
       title: "Unlock your vault in Terminal",
       do_this:
-        "Open Terminal and run the copy_paste_command (hidden prompt). Do NOT call vault_unlock with empty {} or ask the user to reply \"ready\" without a passphrase channel.",
+        "Open Terminal and run the copy_paste_command (hidden prompt). No clone needed. Do NOT call vault_unlock with empty {} or ask the user to reply \"ready\" without a passphrase channel.",
       recommended_path: "cli_unlock",
       host_limitation: HOST_LIMITATION,
-      copy_paste_command: CLI_SETUP_COMMANDS.unlock_from_clone,
+      copy_paste_command: bundledCliCommand("unlock"),
       never:
         "Never approve vault_unlock with empty {}. Never paste the passphrase into chat. Do not run vault_init again — the vault already exists.",
       alternatives: [
@@ -356,9 +411,9 @@ export function buildPrimaryAction(
         },
       ],
       advanced_escape_hatch: {
-        title: "Global CLI unlock",
-        cli_command: CLI_SETUP_COMMANDS.unlock_global,
-        when: "If the global `password-space` binary is on PATH.",
+        title: "Contributor clone unlock (optional)",
+        cli_command: CLI_SETUP_COMMANDS.unlock_from_clone_optional,
+        when: "Only when developing from a git clone.",
       },
     };
   }
@@ -368,7 +423,7 @@ export function buildPrimaryAction(
     do_this:
       "Open Terminal and run the copy_paste_command. Type the secret name, then the value at the hidden prompt. Never paste name/value in chat or MCP App forms.",
     recommended_path: "cli_set",
-    copy_paste_command: CLI_SETUP_COMMANDS.set_from_clone,
+    copy_paste_command: bundledCliCommand("set"),
     never: "Never paste API keys or passwords into chat.",
     alternatives: [
       {
@@ -383,9 +438,9 @@ export function buildPrimaryAction(
       },
     ],
     advanced_escape_hatch: {
-      title: "Global CLI set",
-      cli_command: CLI_SETUP_COMMANDS.set_global,
-      when: "If the global `password-space` binary is on PATH.",
+      title: "Contributor clone set (optional)",
+      cli_command: CLI_SETUP_COMMANDS.set_from_clone_optional,
+      when: "Only when developing from a git clone.",
     },
   };
 }
@@ -398,7 +453,7 @@ export function buildOnboardingSteps(
   const envPassphrase = isPassphraseConfiguredInEnv();
   const passphraseHint = envPassphrase
     ? "Passphrase loads from MCP Environment — call vault_init / vault_unlock with {}."
-    : "Prefer Terminal `pnpm password-space setup` (or unlock). Do not approve empty {}.";
+    : `Prefer Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` (or unlock). Do not approve empty {}.`;
 
   return [
     {
@@ -408,7 +463,7 @@ export function buildOnboardingSteps(
       done: true,
       tool: "vault_onboard",
       user_action:
-        "You're in the right place. Follow primary_action only — Terminal for create, unlock, and add.",
+        "You're in the right place. Follow primary_action only — Terminal for create, unlock, and add (plugin-bundled CLI; no clone).",
     },
     {
       id: "init",
@@ -438,7 +493,7 @@ export function buildOnboardingSteps(
       done: false,
       tool: "cli_set",
       user_action: unlocked
-        ? "In Terminal run `pnpm password-space set` — type name, then hidden value. Never in chat."
+        ? `In Terminal run \`${CLI_SETUP_COMMANDS.plugin_set}\` — type name, then hidden value. Never in chat.`
         : "Unlock first, then save your token or password in Terminal.",
     },
     {
@@ -472,10 +527,10 @@ function recoveryGuidance(opts: {
       return {
         code: opts.dbExists ? "setup_incomplete" : "vault_missing",
         howToFix: opts.dbExists
-          ? "Setup was interrupted. Finish in Terminal: `pnpm password-space setup` (do not retry vault_init with empty {})."
-          : "Create the vault in Terminal with `pnpm password-space setup` — Cursor often has no passphrase field.",
+          ? `Setup was interrupted. Finish in Terminal: \`${CLI_SETUP_COMMANDS.plugin_setup}\` (do not retry vault_init with empty {}).`
+          : `Create the vault in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` — no clone; Cursor often has no passphrase field.`,
         what_to_do: [
-          `Run: ${CLI_SETUP_COMMANDS.from_clone}`,
+          `Run: ${bundledCliCommand("setup")}`,
           "Or set PASSWORD_SPACE_PASSPHRASE under Settings → MCP → password-space → Environment, then vault_init {}.",
           "Optional: vault_manager for status only if MCP Apps UI renders.",
           "Never approve vault_init with empty {} and no passphrase channel.",
@@ -484,10 +539,9 @@ function recoveryGuidance(opts: {
     case "needs_unlock":
       return {
         code: "vault_locked",
-        howToFix:
-          "Your vault already exists. Unlock in Terminal with `pnpm password-space unlock` — do not run vault_init again.",
+        howToFix: `Your vault already exists. Unlock in Terminal with \`${CLI_SETUP_COMMANDS.plugin_unlock}\` — do not run vault_init again.`,
         what_to_do: [
-          `Run: ${CLI_SETUP_COMMANDS.unlock_from_clone}`,
+          `Run: ${bundledCliCommand("unlock")}`,
           "Or set PASSWORD_SPACE_PASSPHRASE in MCP Environment, then vault_unlock {}.",
           "Do not call vault_init — the vault already exists.",
           "If unlock fails with wrong passphrase, retry carefully — there is no recovery without it.",
@@ -496,9 +550,9 @@ function recoveryGuidance(opts: {
     default:
       return {
         code: "ready",
-        howToFix: "Vault is ready. Add a credential in Terminal with `pnpm password-space set`.",
+        howToFix: `Vault is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
         what_to_do: [
-          `Run: ${CLI_SETUP_COMMANDS.set_from_clone}`,
+          `Run: ${bundledCliCommand("set")}`,
           "Then list_secrets / inject_secret via MCP (no values in chat).",
         ],
       };
@@ -617,9 +671,9 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
       action: s.user_action,
     })),
     tip: !passphraseEnv && (!initialized || !unlocked)
-      ? `Default: Terminal CLI (${CLI_SETUP_COMMANDS.from_clone} / unlock). Optional: ${MCP_ENV_PATH}`
+      ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} / unlock). Optional: ${MCP_ENV_PATH}`
       : !passphraseEnv && initialized && unlocked
-        ? `Add secrets in Terminal: ${CLI_SETUP_COMMANDS.set_from_clone}`
+        ? `Add secrets in Terminal: ${bundledCliCommand("set")}`
         : undefined,
     recommended_path: primary_action.recommended_path ?? null,
     host_limitation:
@@ -641,12 +695,11 @@ export async function vaultInitTool(
       error: "Vault already initialized",
       data_dir: dataDir,
       db_path: vaultDbPath(dataDir),
-      howToFix:
-        "Your vault already exists. Unlock in Terminal with `pnpm password-space unlock` (or MCP Environment) — do not create a second vault.",
+      howToFix: `Your vault already exists. Unlock in Terminal with \`${CLI_SETUP_COMMANDS.plugin_unlock}\` (or MCP Environment) — do not create a second vault.`,
       what_to_do: [
-        `Run: ${CLI_SETUP_COMMANDS.unlock_from_clone}`,
+        `Run: ${bundledCliCommand("unlock")}`,
         "Or set PASSWORD_SPACE_PASSPHRASE, then call vault_unlock.",
-        "Then add credentials with `pnpm password-space set`.",
+        `Then add credentials with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
       ],
       recommended_path: "cli_unlock",
       primary_action: buildPrimaryAction(true, false, false, true),
@@ -748,8 +801,8 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
     !isPassphraseConfiguredInEnv() &&
     (!store.isInitialized() || !store.isUnlocked);
   const cliCommand = store.isInitialized()
-    ? CLI_SETUP_COMMANDS.unlock_from_clone
-    : CLI_SETUP_COMMANDS.from_clone;
+    ? bundledCliCommand("unlock")
+    : bundledCliCommand("setup");
   return jsonResult({
     ok: true,
     app: "vault-manager",
@@ -757,7 +810,7 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
     /** Hosts must bind this URI from tool _meta.ui.resourceUri + Apps resource. */
     resource_mime_hint: "text/html;profile=mcp-app",
     progressive_enhancement:
-      "Optional status UI when MCP Apps render. Primary create/unlock/add is Terminal CLI. Never paste App HTML/JS into chat.",
+      "Optional status UI when MCP Apps render. Primary create/unlock/add is plugin-bundled Terminal CLI. Never paste App HTML/JS into chat.",
     apps_ui_expected: true,
     /** Agent contract: this tool returns JSON + Apps metadata only — never the UI bundle source. */
     agent_contract:
@@ -777,10 +830,9 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
           ],
         }
       : {
-          reason:
-            "App UI unavailable — use Terminal `pnpm password-space set` to add secrets, then list_secrets / inject_secret. Never dump UI resource body into chat.",
+          reason: `App UI unavailable — use Terminal \`${CLI_SETUP_COMMANDS.plugin_set}\` to add secrets, then list_secrets / inject_secret. Never dump UI resource body into chat.`,
           recommended_path: "cli_set",
-          copy_paste_command: CLI_SETUP_COMMANDS.set_from_clone,
+          copy_paste_command: bundledCliCommand("set"),
           never: [
             "Paste vault-manager.html / minified JS into chat",
             "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
@@ -935,12 +987,12 @@ function publicMeta(m: SecretMetadata): SecretMetadata {
 function assertUnlocked(store: VaultStore): void {
   if (!store.isInitialized()) {
     throw new Error(
-      "Password Space is not set up yet. Call vault_onboard, then run Terminal `pnpm password-space setup` (or vault_init with PASSWORD_SPACE_PASSPHRASE) — do not vault_init with empty {}.",
+      `Password Space is not set up yet. Call vault_onboard, then run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` (or vault_init with PASSWORD_SPACE_PASSPHRASE) — do not vault_init with empty {}.`,
     );
   }
   if (!store.isUnlocked) {
     throw new Error(
-      "Password Space is locked. Run Terminal `pnpm password-space unlock`, or set PASSWORD_SPACE_PASSPHRASE then vault_unlock — not empty {}.",
+      `Password Space is locked. Run Terminal \`${CLI_SETUP_COMMANDS.plugin_unlock}\`, or set PASSWORD_SPACE_PASSPHRASE then vault_unlock — not empty {}.`,
     );
   }
 }

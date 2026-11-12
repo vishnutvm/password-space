@@ -6,7 +6,9 @@ import { VaultStore, openVault } from "@password-space/vault";
 import {
   assertNoPlaintext,
   checkPrerequisites,
+  BUNDLED_CLI_NODE,
   CLI_SETUP_COMMANDS,
+  bundledCliCommand,
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
@@ -140,7 +142,8 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.recommended_path).toBe("cli_setup");
     expect(parsed.host_limitation).toMatch(/empty \{\}/i);
     expect(parsed.next).toMatch(/Terminal|copy_paste|setup/i);
-    expect(parsed.primary_action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.from_clone);
+    expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("setup"));
+    expect(parsed.primary_action.copy_paste_command).toContain("cli.js");
     expect(parsed.next_steps.some((s) => s.tool === "cli_setup")).toBe(true);
     store.close();
   });
@@ -150,18 +153,28 @@ describe("vault lifecycle MCP tools", () => {
     expect(action.id).toBe("cli_setup");
     expect(action.recommended_path).toBe("cli_setup");
     expect(action.mcp_tool).toBeUndefined();
-    expect(action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.from_clone);
+    expect(action.copy_paste_command).toBe(bundledCliCommand("setup"));
+    expect(action.copy_paste_command).toMatch(/cli\.js/);
     expect(action.host_limitation).toMatch(/empty \{\}/i);
     expect(action.never).toMatch(/ready/i);
     expect(action.alternatives?.some((a) => a.id === "mcp_env")).toBe(true);
-    expect(action.advanced_escape_hatch?.cli_command).toBe(CLI_SETUP_COMMANDS.global_cli);
+    expect(action.advanced_escape_hatch?.cli_command).toBe(
+      CLI_SETUP_COMMANDS.from_clone_optional,
+    );
   });
 
   it("buildPrimaryAction prefers cli_set when vault ready", () => {
     const action = buildPrimaryAction(true, true, true);
     expect(action.id).toBe("cli_set");
     expect(action.recommended_path).toBe("cli_set");
-    expect(action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.set_from_clone);
+    expect(action.copy_paste_command).toBe(bundledCliCommand("set"));
+  });
+
+  it("CLI_SETUP_COMMANDS.plugin_* use CURSOR_PLUGIN_ROOT bundled cli.js", () => {
+    expect(CLI_SETUP_COMMANDS.plugin_setup).toBe(`${BUNDLED_CLI_NODE} setup`);
+    expect(CLI_SETUP_COMMANDS.plugin_unlock).toBe(`${BUNDLED_CLI_NODE} unlock`);
+    expect(CLI_SETUP_COMMANDS.plugin_set).toBe(`${BUNDLED_CLI_NODE} set`);
+    expect(CLI_SETUP_COMMANDS.plugin_setup).toContain("${CURSOR_PLUGIN_ROOT}/dist/cli.js");
   });
 
   it("buildPrimaryAction prefers vault_init_env when PASSWORD_SPACE_PASSPHRASE set", () => {
@@ -224,7 +237,7 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.recommended_path).toBe("cli_setup");
     expect(parsed.primary_action.mcp_tool).toBeUndefined();
     expect(parsed.host_limitation).toMatch(/empty \{\}/i);
-    expect(parsed.copy_paste_command).toBe(CLI_SETUP_COMMANDS.from_clone);
+    expect(parsed.copy_paste_command).toBe(bundledCliCommand("setup"));
     expect(parsed.primary_action.do_this).toMatch(/Terminal|copy_paste/i);
     expect(parsed.what_to_do).toHaveLength(1);
     expect(parsed.never_do.some((n) => /ready/i.test(n))).toBe(true);
@@ -251,7 +264,7 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.primary_action.id).toBe("cli_unlock");
     expect(parsed.recommended_path).toBe("cli_unlock");
     expect(parsed.primary_action.mcp_tool).toBeUndefined();
-    expect(parsed.primary_action.copy_paste_command).toBe(CLI_SETUP_COMMANDS.unlock_from_clone);
+    expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("unlock"));
     expect(parsed.recovery.code).toBe("vault_locked");
     expect(parsed.recovery.howToFix).toMatch(/do not run vault_init/i);
     expect(parsed.human_summary).toMatch(/already exists/i);

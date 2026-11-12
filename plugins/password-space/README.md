@@ -8,16 +8,23 @@
 
 | Piece | Purpose |
 | --- | --- |
-| MCP server | Status, list, inject, lock after unlock |
+| MCP server (`dist/index.js`) | Status, list, inject, lock after unlock |
+| Terminal CLI (`dist/cli.js`) | Create / unlock / add secrets with hidden prompts — **bundled; no clone** |
 | Skill + `/setup-password-space` | Guided setup — Terminal-first |
-| CLI | Create / unlock / add secrets with hidden prompts |
 | Hooks | Gentle welcome when no vault yet; redaction before send |
 
 ## After install
 
 1. In chat: **`/setup-password-space`** — follow `primary_action` (**Terminal** first).
-2. Open Terminal and run the shown command (e.g. `pnpm password-space setup`) — passphrase is typed there, hidden.
-3. Add a credential: `pnpm password-space set` — prompts for name, then hidden value.
+2. Open Terminal and run the shown **`copy_paste_command`** — typically:
+   ```bash
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
+   ```
+   (After Reload, the agent may show an absolute path to the same `cli.js`.) Passphrase is typed there, hidden. **No git clone.**
+3. Add a credential:
+   ```bash
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
+   ```
 4. Back in Cursor: `vault_status` / `list_secrets` / `inject_secret`. Never approve empty `{}` when Cursor shows no passphrase field.
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
