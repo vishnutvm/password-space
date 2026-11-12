@@ -29206,13 +29206,16 @@ var VaultStore = class {
 import { chmodSync, existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 var DEFAULT_TTL_MS = 8 * 60 * 60 * 1e3;
+var SESSION_TTL_1_DAY_MS = 24 * 60 * 60 * 1e3;
+var SESSION_TTL_1_WEEK_MS = 7 * 24 * 60 * 60 * 1e3;
 function writeSession(sessionFilePath, vaultKey, dataDir2, ttlMs = DEFAULT_TTL_MS) {
   mkdirSync2(dirname2(sessionFilePath), { recursive: true });
   const fileKey = randomKey();
   const wrapped = encrypt(vaultKey, fileKey);
+  const untilLock = ttlMs === null;
   const payload = {
     version: 1,
-    expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+    expiresAt: untilLock ? null : new Date(Date.now() + ttlMs).toISOString(),
     dataDir: dataDir2,
     fileKey: fileKey.toString("base64"),
     wrappedVaultKey: packBlob(wrapped).toString("base64")
@@ -29238,9 +29241,13 @@ function readSession(sessionFilePath) {
   if (payload.version !== 1) {
     throw new VaultError("Unsupported session version", "INVALID");
   }
-  if (new Date(payload.expiresAt).getTime() < Date.now()) {
-    clearSession(sessionFilePath);
-    throw new VaultError("Unlock session expired. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
+  const untilLock = payload.expiresAt === null || payload.expiresAt === void 0;
+  if (!untilLock) {
+    const exp = new Date(payload.expiresAt).getTime();
+    if (!Number.isFinite(exp) || exp < Date.now()) {
+      clearSession(sessionFilePath);
+      throw new VaultError("Unlock session expired. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
+    }
   }
   const fileKey = Buffer.from(payload.fileKey, "base64");
   if (fileKey.length !== KEY_LEN) {
@@ -29248,7 +29255,12 @@ function readSession(sessionFilePath) {
   }
   try {
     const vaultKey = decrypt(unpackBlob(Buffer.from(payload.wrappedVaultKey, "base64")), fileKey);
-    return { vaultKey, dataDir: payload.dataDir, expiresAt: payload.expiresAt };
+    return {
+      vaultKey,
+      dataDir: payload.dataDir,
+      expiresAt: untilLock ? null : payload.expiresAt,
+      untilLock
+    };
   } finally {
     fileKey.fill(0);
   }
@@ -29434,7 +29446,7 @@ async function unlockVaultToSession(passphrase, opts = {}) {
     vaultKey.fill(0);
     session.vaultKey.fill(0);
     recordUnlockSuccess(dataDir2);
-    return { expiresAt: session.expiresAt };
+    return { expiresAt: session.expiresAt, untilLock: session.untilLock };
   } catch (err) {
     if (err instanceof VaultError && err.code === "WRONG_PASSPHRASE") {
       recordUnlockFailure(dataDir2);
@@ -29455,7 +29467,7 @@ async function changeVaultPassphrase(currentPassphrase, nextPassphrase, opts = {
     vaultKey.fill(0);
     session.vaultKey.fill(0);
     recordUnlockSuccess(dataDir2);
-    return { expiresAt: session.expiresAt };
+    return { expiresAt: session.expiresAt, untilLock: session.untilLock };
   } catch (err) {
     if (err instanceof VaultError && err.code === "WRONG_PASSPHRASE") {
       recordUnlockFailure(dataDir2);
@@ -29516,10 +29528,11 @@ function resolveBundledCliPath() {
 function shellQuote(path) {
   return `"${path.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
-function bundledCliCommand(subcommand) {
+function bundledCliCommand(subcommand = "") {
   const abs = resolveBundledCliPath();
-  if (abs) return `node ${shellQuote(abs)} ${subcommand}`;
-  return `${BUNDLED_CLI_NODE} ${subcommand}`;
+  const base = abs ? `node ${shellQuote(abs)}` : BUNDLED_CLI_NODE;
+  const sub = subcommand.trim();
+  return sub ? `${base} ${sub}` : base;
 }
 var MCP_ENV_PATH = "Settings \u2192 MCP \u2192 password-space \u2192 Environment \u2192 PASSWORD_SPACE_PASSPHRASE (8+ chars), then call vault_init / vault_unlock with empty {}.";
 var PassphraseRequiredError = class extends Error {
@@ -29647,17 +29660,12 @@ function buildPrimaryAction(initialized, unlocked, session, prereqOk = true) {
       recommended_path: "cli_setup",
       host_limitation: HOST_LIMITATION,
       copy_paste_command: bundledCliCommand("setup"),
-      never: 'Never call vault_init with empty {}. Never ask the user to reply "ready" then approve without a passphrase field. Never paste the passphrase into chat. Never collect passphrase or secret values in Vault Manager App forms or MCP approval forms when Terminal is available.',
+      never: 'Never call vault_init with empty {}. Never ask the user to reply "ready" then approve without a passphrase field. Never paste the passphrase into chat. Never collect passphrase or secret values in App forms or MCP approval forms when Terminal is available.',
       alternatives: [
         {
           id: "mcp_env",
           title: "One-click MCP Environment",
           do_this: MCP_ENV_PATH
-        },
-        {
-          id: "vault_manager",
-          title: "Vault Manager (optional status UI)",
-          do_this: "Call vault_manager only for status when Apps render. Prefer Terminal for create/unlock/add \u2014 if only JSON returns, use CLI setup."
         }
       ],
       advanced_escape_hatch: {
@@ -29686,7 +29694,7 @@ function buildPrimaryAction(initialized, unlocked, session, prereqOk = true) {
     return {
       id: "cli_unlock",
       title: "Unlock your vault in Terminal",
-      do_this: 'Open Terminal and run the copy_paste_command (hidden prompt). No clone needed. Do NOT call vault_unlock with empty {} or ask the user to reply "ready" without a passphrase channel.',
+      do_this: 'Open Terminal and run the copy_paste_command (hidden prompt + session duration: 1 day / 1 week / until lock). No clone needed. Do NOT call vault_unlock with empty {} or ask the user to reply "ready" without a passphrase channel.',
       recommended_path: "cli_unlock",
       host_limitation: HOST_LIMITATION,
       copy_paste_command: bundledCliCommand("unlock"),
@@ -29696,11 +29704,6 @@ function buildPrimaryAction(initialized, unlocked, session, prereqOk = true) {
           id: "mcp_env",
           title: "One-click MCP Environment",
           do_this: MCP_ENV_PATH
-        },
-        {
-          id: "vault_manager",
-          title: "Vault Manager (optional status UI)",
-          do_this: "Call vault_manager for status if Apps render; otherwise use Terminal unlock."
         }
       ],
       advanced_escape_hatch: {
@@ -29713,20 +29716,20 @@ function buildPrimaryAction(initialized, unlocked, session, prereqOk = true) {
   return {
     id: "cli_set",
     title: "Add a credential in Terminal",
-    do_this: "Open Terminal and run the copy_paste_command. Type the secret name, then the value at the hidden prompt. Never paste name/value in chat or MCP App forms.",
+    do_this: "Open Terminal and run the copy_paste_command (or bare cli.js for the interactive menu). Type the secret name, then the value at the hidden prompt. Never paste name/value in chat.",
     recommended_path: "cli_set",
     copy_paste_command: bundledCliCommand("set"),
     never: "Never paste API keys or passwords into chat.",
     alternatives: [
       {
-        id: "vault_manager",
-        title: "Vault Manager (optional status)",
-        do_this: "Call vault_manager for list/status when Apps render \u2014 prefer Terminal for add."
-      },
-      {
         id: "list_secrets",
         title: "List via MCP",
         do_this: "After Terminal add, call list_secrets or vault_status (no values)."
+      },
+      {
+        id: "cli_menu",
+        title: "Interactive Terminal menu",
+        do_this: `Run ${bundledCliCommand("")} (no subcommand) for setup / unlock / add / remove / lock / status.`
       }
     ],
     advanced_escape_hatch: {
@@ -29801,8 +29804,8 @@ function recoveryGuidance(opts) {
         what_to_do: [
           `Run: ${bundledCliCommand("setup")}`,
           "Or set PASSWORD_SPACE_PASSPHRASE under Settings \u2192 MCP \u2192 password-space \u2192 Environment, then vault_init {}.",
-          "Optional: vault_manager for status only if MCP Apps UI renders.",
-          "Never approve vault_init with empty {} and no passphrase channel."
+          "Never approve vault_init with empty {} and no passphrase channel.",
+          "Do not use App forms for create/add \u2014 Terminal CLI only."
         ]
       };
     case "needs_unlock":
@@ -29967,16 +29970,20 @@ async function vaultInitTool(store, dataDir2, args) {
 async function vaultUnlockTool(dataDir2, args) {
   assertNodeVersion();
   const passphrase = resolvePassphrase(args.passphrase);
-  const ttlHours = args.ttl_hours ?? 8;
-  const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1e3;
-  const { expiresAt } = await unlockVaultToSession(passphrase, { dataDir: dataDir2, ttlMs });
+  const ttlMs = args.until_lock === true ? null : Math.max(0.1, args.ttl_hours ?? 8) * 60 * 60 * 1e3;
+  const { expiresAt, untilLock } = await unlockVaultToSession(passphrase, {
+    dataDir: dataDir2,
+    ttlMs
+  });
   return jsonResult({
     ok: true,
     unlocked: true,
     data_dir: dataDir2,
     expires_at: expiresAt,
-    next: "Use vault_set_secret to store credentials, then inject_secret for agent use.",
-    note: "Passphrase was not returned and must not be pasted into chat."
+    until_lock: untilLock,
+    session_path: sessionPath(dataDir2),
+    next: "Prefer Terminal for add/remove. Agents: list_secrets / inject_secret. Lock via Terminal lock or vault_lock.",
+    note: "Passphrase was not returned and must not be pasted into chat. Session lives under ~/.password-space/session (0600)."
   });
 }
 function vaultLockTool(dataDir2) {
@@ -29995,15 +30002,18 @@ async function vaultChangePassphraseTool(dataDir2, args) {
   if (!next || next.length < 8) {
     throw new Error("new_passphrase must be at least 8 characters.");
   }
-  const ttlHours = args.ttl_hours ?? 8;
-  const ttlMs = Math.max(0.1, ttlHours) * 60 * 60 * 1e3;
-  const { expiresAt } = await changeVaultPassphrase(current, next, { dataDir: dataDir2, ttlMs });
+  const ttlMs = args.ttl_hours === void 0 ? void 0 : Math.max(0.1, args.ttl_hours) * 60 * 60 * 1e3;
+  const { expiresAt, untilLock } = await changeVaultPassphrase(current, next, {
+    dataDir: dataDir2,
+    ttlMs
+  });
   return jsonResult({
     ok: true,
     changed: true,
     unlocked: true,
     data_dir: dataDir2,
     expires_at: expiresAt,
+    until_lock: untilLock,
     note: "Passphrase updated. Session refreshed. Passphrases were not returned."
   });
 }
@@ -30026,43 +30036,35 @@ function vaultManagerTool(store, dataDir2) {
   return jsonResult({
     ok: true,
     app: "vault-manager",
+    mode: "status_only",
     ui_resource: "ui://password-space/vault-manager.html",
-    /** Hosts must bind this URI from tool _meta.ui.resourceUri + Apps resource. */
     resource_mime_hint: "text/html;profile=mcp-app",
-    progressive_enhancement: "Optional status UI when MCP Apps render. Primary create/unlock/add is plugin-bundled Terminal CLI. Never paste App HTML/JS into chat.",
-    apps_ui_expected: true,
-    /** Agent contract: this tool returns JSON + Apps metadata only — never the UI bundle source. */
-    agent_contract: "Do not fetch or paste ui://password-space/vault-manager.html into the conversation. Prefer Terminal for create/unlock/add; use list_secrets / inject_secret / vault_lock after unlock.",
-    apps_fallback: needsPassphraseChannel ? {
-      reason: "Prefer Terminal for passphrase entry. If no App UI rendered, run copy_paste_command or set PASSWORD_SPACE_PASSPHRASE. Do not call vault_init with empty {}. Do not dump App source.",
-      recommended_path: "cli_setup",
-      next_tool: store.isInitialized() ? "cli_unlock" : "cli_setup",
-      copy_paste_command: cliCommand,
+    progressive_enhancement: "Status-only. Do not guide users to App forms for create/unlock/add. Human UX is the plugin Terminal CLI.",
+    apps_ui_expected: false,
+    agent_contract: "Do not call vault_manager for setup. Show Terminal copy_paste_command instead. Use list_secrets / inject_secret / vault_lock after unlock. Never paste App HTML/JS into chat.",
+    apps_fallback: {
+      reason: "Human setup/credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms.",
+      recommended_path: needsPassphraseChannel ? store.isInitialized() ? "cli_unlock" : "cli_setup" : "cli_set",
+      next_tool: needsPassphraseChannel ? store.isInitialized() ? "cli_unlock" : "cli_setup" : "cli_set",
+      copy_paste_command: needsPassphraseChannel ? cliCommand : bundledCliCommand("set"),
       mcp_env_alternative: MCP_ENV_PATH,
       never: [
+        "Guide users to Vault Manager / App forms for create, unlock, or add",
         "Paste vault-manager.html / minified JS into chat",
         "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
-        "Collect passphrase or secret values in App forms when Terminal is available"
-      ]
-    } : {
-      reason: `App UI unavailable \u2014 use Terminal \`${CLI_SETUP_COMMANDS.plugin_set}\` to add secrets, then list_secrets / inject_secret. Never dump UI resource body into chat.`,
-      recommended_path: "cli_set",
-      copy_paste_command: bundledCliCommand("set"),
-      never: [
-        "Paste vault-manager.html / minified JS into chat",
-        "FetchMcpResource ui://password-space/vault-manager.html into the transcript"
+        "Call vault_init with empty {}"
       ]
     },
     host_limitation: needsPassphraseChannel ? HOST_LIMITATION : void 0,
     status: parsed,
     secrets,
     capabilities: {
-      list: "list_secrets",
-      add_or_edit: "cli_set (Terminal) / vault_set_secret",
-      remove: "vault_delete_secret",
-      lock: "vault_lock",
-      unlock: "cli_unlock (Terminal) / vault_unlock",
-      change_passphrase: "vault_change_passphrase",
+      list: "list_secrets (MCP) or Terminal list",
+      add_or_edit: "Terminal set / interactive menu only",
+      remove: "Terminal remove (or vault_delete_secret after unlock)",
+      lock: "Terminal lock / vault_lock",
+      unlock: "Terminal unlock (choose 1d / 1w / until-lock)",
+      change_passphrase: "Terminal change-passphrase",
       inject: "inject_secret"
     },
     passphrase_note: "Passphrase and secret values belong in Terminal (hidden prompts), or optional PASSWORD_SPACE_PASSPHRASE env \u2014 never via elicitation, never in chat.",
@@ -30272,15 +30274,16 @@ server.registerTool(
   "vault_unlock",
   {
     title: "Unlock your vault",
-    description: "Step 3 of setup: unlocks for this session so you can save and use credentials. Same passphrase in the approval form.",
+    description: "Unlocks for this machine session (prefer Terminal unlock with 1 day / 1 week / until lock). Same passphrase in the approval form only if using MCP path.",
     inputSchema: {
       ...optionalPassphraseShape,
-      ttl_hours: external_exports.number().min(0.1).max(168).optional().describe("How long to stay unlocked in hours (default 8, max 168).")
+      ttl_hours: external_exports.number().min(0.1).max(168).optional().describe("How long to stay unlocked in hours (default 8, max 168). Ignored when until_lock is true."),
+      until_lock: external_exports.boolean().optional().describe("If true, session does not auto-expire until vault_lock / CLI lock.")
     }
   },
-  async ({ passphrase, ttl_hours }) => {
+  async ({ passphrase, ttl_hours, until_lock }) => {
     try {
-      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours });
+      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours, until_lock });
     } catch (err) {
       return errorResult(err);
     }
@@ -30302,7 +30305,7 @@ server.registerTool(
   "vault_change_passphrase",
   {
     title: "Change vault passphrase",
-    description: "Re-wraps the vault key under a new passphrase. Enter current and new passphrase in the approval form or Vault Manager App \u2014 never in chat, never via elicitation.",
+    description: "Re-wraps the vault key under a new passphrase. Prefer Terminal `change-passphrase` (hidden prompts). Approval-form args only as last resort \u2014 never in chat, never via elicitation.",
     inputSchema: {
       current_passphrase: passphraseSchema.optional().describe(
         "Current vault passphrase. Optional if PASSWORD_SPACE_PASSPHRASE is set."
@@ -30344,8 +30347,8 @@ K3(
   server,
   "vault_manager",
   {
-    title: "Open Vault Manager",
-    description: 'Optional Password Space Vault Manager status UI (Cursor MCP Apps 2.6+). Primary create/unlock/add is the plugin-bundled Terminal CLI (`node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup|unlock|set`). Prefer list_secrets / inject_secret / vault_lock after unlock. Do not vault_init with empty {}.',
+    title: "Vault status (optional)",
+    description: 'Status-only. Do NOT use for create/unlock/add \u2014 human UX is the plugin Terminal CLI (`node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"` menu|setup|unlock|set|remove|lock). Prefer vault_status / list_secrets / inject_secret / vault_lock. Do not vault_init with empty {}.',
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },

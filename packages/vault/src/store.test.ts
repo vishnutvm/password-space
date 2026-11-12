@@ -4,7 +4,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VaultStore } from "./store.js";
 import { VaultError } from "./types.js";
-import { writeSession, readSession, clearSession } from "./session.js";
+import {
+  writeSession,
+  readSession,
+  clearSession,
+  parseSessionTtlInput,
+  SESSION_TTL_1_DAY_MS,
+  SESSION_TTL_1_WEEK_MS,
+} from "./session.js";
 import { redactSecrets, looksLikeSecretLeak } from "./redact.js";
 import { writeInjectFile, clearExpiredInjectFiles } from "./inject.js";
 
@@ -102,6 +109,31 @@ describe("VaultStore lock state", () => {
     expect(() => readSession(sessionFile)).toThrow(VaultError);
     expect(existsSync(sessionFile)).toBe(false);
     store.close();
+  });
+
+  it("until-lock session never auto-expires", async () => {
+    const { dir, store } = tmpVault();
+    await store.init("test-passphrase-ok");
+    const key = await store.unlock("test-passphrase-ok");
+    const sessionFile = join(dir, "session");
+    writeSession(sessionFile, key, dir, null);
+    key.fill(0);
+    store.lock();
+    const session = readSession(sessionFile);
+    expect(session.untilLock).toBe(true);
+    expect(session.expiresAt).toBeNull();
+    store.unlockWithKey(session.vaultKey);
+    expect(store.isUnlocked).toBe(true);
+    session.vaultKey.fill(0);
+    clearSession(sessionFile);
+    store.close();
+  });
+
+  it("parseSessionTtlInput accepts presets", () => {
+    expect(parseSessionTtlInput("1d")).toBe(SESSION_TTL_1_DAY_MS);
+    expect(parseSessionTtlInput("1w")).toBe(SESSION_TTL_1_WEEK_MS);
+    expect(parseSessionTtlInput("until-lock")).toBeNull();
+    expect(parseSessionTtlInput(2)).toBe(2 * 60 * 60 * 1000);
   });
 
   it("setSecret updates by name and rejects duplicate names", async () => {

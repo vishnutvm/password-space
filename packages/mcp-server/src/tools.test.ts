@@ -358,15 +358,15 @@ describe("vault lifecycle MCP tools", () => {
     };
     expect(parsed.app).toBe("vault-manager");
     expect(parsed.ui_resource).toMatch(/^ui:\/\//);
-    expect(parsed.apps_ui_expected).toBe(true);
+    expect(parsed.apps_ui_expected).toBe(false);
     expect(parsed.apps_fallback.recommended_path).toBe("cli_set");
-    expect(parsed.agent_contract).toMatch(/Do not fetch or paste/i);
-    expect(parsed.apps_fallback.never?.join(" ")).toMatch(/vault-manager\.html/i);
+    expect(parsed.agent_contract).toMatch(/Terminal/i);
+    expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
     expect(result.content[0]!.text).not.toMatch(/<!DOCTYPE html>/i);
     expect(result.content[0]!.text).not.toMatch(/ZodError|invalid_union/);
     expect(parsed.secrets[0]?.name).toBe("DEMO_KEY");
     expect(parsed.secrets[0]?.value).toBeUndefined();
-    expect(parsed.capabilities.remove).toBe("vault_delete_secret");
+    expect(parsed.capabilities.remove).toMatch(/Terminal remove/i);
     store.close();
   });
 
