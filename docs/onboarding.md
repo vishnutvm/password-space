@@ -10,14 +10,14 @@ Password Space keeps your API keys and passwords **on your Mac**, **encrypted**,
 2. Import `https://github.com/vishnutvm/password-space` and install **password-space**.
 3. Ensure **Node.js 20+** (`node -v`), then reload Cursor.
 
-## Set up (default = Vault Manager / chat UI)
+## Set up (default = Terminal)
 
 | Step | You do | Agent / tool |
 | --- | --- | --- |
 | **1. Welcome** | Run **`/setup-password-space`** | `vault_onboard` |
-| **2. Secure** | Create vault in **Vault Manager** (or type passphrase in approval form) | `vault_manager` → `vault_init` |
-| **3. Unlock** | Same channel | `vault_manager` / `vault_unlock` |
-| **4. Save** | Name + token in App or approval form | `vault_set_secret` |
+| **2. Secure** | Terminal: `pnpm password-space setup` (hidden passphrase) | follow `copy_paste_command` |
+| **3. Unlock** | Terminal: `pnpm password-space unlock` when needed | same |
+| **4. Save** | Terminal: `pnpm password-space set` (name + hidden value) | then `list_secrets` |
 
 ### Optional: MCP Environment
 
@@ -26,17 +26,18 @@ Then `vault_init` / `vault_unlock` with `{}` is safe. Never put that value in ch
 
 ### The one rule people miss
 
-Never approve `vault_init` / `vault_unlock` with empty fields unless `PASSWORD_SPACE_PASSPHRASE` is set. Never reply "ready" and expect the agent to invent a passphrase channel. Never treat Terminal as the day-1 path.
+Never approve `vault_init` / `vault_unlock` with empty fields unless `PASSWORD_SPACE_PASSPHRASE` is set. Never reply "ready" and expect the agent to invent a passphrase channel. Create, unlock, and add secrets in **Terminal**.
 
 ## Daily use
 
-- **Vault Manager (MCP Apps):** ask the agent to open **`vault_manager`** — interactive list/add/edit/remove (Cursor 2.6+). If only JSON returns, use approval-form tools.
-- **Status:** `vault_status`
+- **Add a secret:** Terminal `pnpm password-space set`
+- **Status / list:** `vault_status` / `list_secrets`
 - **Use a saved credential:** `inject_secret` (preferred — no value in chat)
 - **Done for the day:** `vault_lock`
+- **Optional UI:** `vault_manager` for status only when MCP Apps render
 
 ## Need help?
 
-Say: *“Walk me through Password Space setup.”* The agent should call `vault_onboard` and open **Vault Manager** (or guide the approval form) — no `mcp.json`, no Terminal required.
+Say: *“Walk me through Password Space setup.”* The agent should call `vault_onboard` and show the Terminal command — no `mcp.json`, no Configure UI.
 
 More: [zero-friction-v1.md](./zero-friction-v1.md) · [plugin README](../plugins/password-space/README.md) · [Security](../SECURITY.md)

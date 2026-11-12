@@ -232,7 +232,7 @@ registerAppTool(
   {
     title: "Open Vault Manager",
     description:
-      "Interactive Password Space Vault Manager (list/add/edit/remove credentials, lock/unlock, change passphrase). Primary onboarding UI (Cursor MCP Apps 2.6+). If only JSON returns, fall back to vault_init/vault_unlock with a passphrase in the approval form or PASSWORD_SPACE_PASSPHRASE — do not vault_init with empty {}.",
+      "Optional Password Space Vault Manager status UI (Cursor MCP Apps 2.6+). Primary create/unlock/add is Terminal CLI (`pnpm password-space setup|unlock|set`). Prefer list_secrets / inject_secret / vault_lock after unlock. Do not vault_init with empty {}.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },
@@ -406,26 +406,21 @@ function errorResult(err: unknown) {
     payload.code = err.code;
     payload.host_limitation = err.host_limitation;
     payload.recommended_path = err.recommended_path;
+    payload.copy_paste_command = CLI_SETUP_COMMANDS.from_clone;
+    payload.copy_paste_commands = CLI_SETUP_COMMANDS;
     payload.howToFix =
-      "Stop retrying vault_init/unlock with empty {}. Call vault_manager, type the passphrase in a visible approval form, or set PASSWORD_SPACE_PASSPHRASE in MCP Environment.";
+      "Stop retrying vault_init/unlock with empty {}. Run Terminal CLI setup (copy_paste_command) or set PASSWORD_SPACE_PASSPHRASE in MCP Environment.";
     payload.what_happened =
       "Cursor approved the tool with empty {} — no passphrase was provided (common host limitation).";
     payload.what_to_do = [
-      "Recommended: call vault_manager — create/unlock in the App UI if it renders.",
-      "Or call vault_init / vault_unlock and type the passphrase in the approval form.",
+      `Recommended: ${CLI_SETUP_COMMANDS.from_clone}`,
       `Or: ${MCP_ENV_PATH}`,
+      "Vault Manager is optional status UI only — prefer Terminal for create/unlock/add.",
       "Do not ask the user to reply \"ready\" then call vault_init again without a passphrase channel.",
-      "Do not lead newcomers with Terminal CLI.",
     ];
-    payload.advanced_escape_hatch = {
-      title: "Terminal (power users only)",
-      cli_command: CLI_SETUP_COMMANDS.from_clone,
-      when: "Only if the user explicitly asks for Terminal / CLI.",
-    };
     payload.never = [
       "Approve vault_init / vault_unlock with empty {}",
       'Tell the user to reply "ready" then call vault_init without passphrase',
-      "Present Terminal CLI as the default onboarding path",
     ];
   } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
     payload.code = "passphrase_too_short";
@@ -434,17 +429,17 @@ function errorResult(err: unknown) {
   } else if (/Wrong passphrase/i.test(message)) {
     payload.code = "wrong_passphrase";
     payload.howToFix =
-      "That passphrase did not unlock the vault. Retry carefully via vault_manager, approval form, or MCP Environment — there is no recovery without the correct passphrase.";
+      "That passphrase did not unlock the vault. Retry carefully via Terminal unlock or MCP Environment — there is no recovery without the correct passphrase.";
   } else if (/locked/i.test(message)) {
-    payload.howToFix =
-      "Call vault_manager or vault_unlock with a passphrase in the approval form, or set PASSWORD_SPACE_PASSPHRASE then vault_unlock.";
+    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.unlock_from_clone}\` or set PASSWORD_SPACE_PASSPHRASE then vault_unlock.`;
     payload.host_limitation = HOST_LIMITATION;
-    payload.recommended_path = "vault_manager";
+    payload.recommended_path = "cli_unlock";
+    payload.copy_paste_command = CLI_SETUP_COMMANDS.unlock_from_clone;
   } else if (/not set up|not initialized/i.test(message)) {
-    payload.howToFix =
-      "Run /setup-password-space and follow primary_action (vault_manager first). Do not vault_init with empty {}.";
+    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.from_clone}\` or /setup-password-space and follow primary_action (Terminal-first).`;
     payload.host_limitation = HOST_LIMITATION;
-    payload.recommended_path = "vault_manager";
+    payload.recommended_path = "cli_setup";
+    payload.copy_paste_command = CLI_SETUP_COMMANDS.from_clone;
   }
 
   return {
