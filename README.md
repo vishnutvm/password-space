@@ -27,7 +27,7 @@ Password Space keeps **ciphertext on disk**, an **explicit unlock** gate, and an
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
 | Session TTL | Unlock session expires (default **8 hours**); expired sessions are rejected and cleared |
 | Redaction hook | Optional `beforeSubmitPrompt` hook strips **known** inject values from outbound prompts |
-| Bundled plugin MCP | `plugins/password-space/dist/index.js` is a self-contained esbuild bundle (vault + MCP) |
+| Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
 When the vault is **locked**, mutating/read tools fail until unlock again. Restarting the MCP process does not unlock the vault — it only re-reads an existing valid session file.
 
@@ -53,7 +53,7 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 | --- | --- |
 | Node.js | **≥ 20** (uses built-in `node:sqlite`) — required to run the bundled MCP |
 | Cursor plugin | Cursor with marketplace / MCP support |
-| Package manager | **pnpm** 9.x — **optional**; only for CLI / developing this repo |
+| Package manager | **pnpm** 9.x — **optional**; only for developing this repo (external users use the plugin-bundled CLI) |
 | OS | Developed and verified on **macOS**; should run anywhere Node 20 + `node:sqlite` works — treat Linux/Windows as **best-effort** until listed here as tested |
 
 ## Quickstart (Cursor plugin + Terminal)
@@ -66,11 +66,16 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 4. Install the **password-space** plugin and reload Cursor.
 5. Vault home defaults to **`~/.password-space`**. Optional override: a **real** absolute `PASSWORD_SPACE_HOME` in the process environment or MCP `env`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default. There is **no** Plugins → Configure UI for this.
 6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`**.
-7. **Default:** follow `primary_action` — open **Terminal** and run `copy_paste_command` (`pnpm password-space setup` / `unlock` / `set`). Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`.
+7. **Default:** follow `primary_action` — open **Terminal** and run `copy_paste_command`. **No repo clone.** Typical commands after marketplace install + Reload:
+   ```bash
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
+   ```
+   Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`.
 8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}`.
 
 ```text
-vault_onboard → Terminal: setup → Terminal: set → vault_status / list_secrets → inject_secret
+vault_onboard → Terminal: …/dist/cli.js setup → …/dist/cli.js set → vault_status / list_secrets → inject_secret
 # optional: MCP Environment PASSWORD_SPACE_PASSPHRASE → vault_init {} → vault_unlock {}
 ```
 
@@ -78,22 +83,33 @@ Pass **passphrase** and **secret name + value** in **Terminal** — **never** in
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
-Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/`.
+Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/` (ships `dist/index.js` + `dist/cli.js`).
 
 ## CLI (create / unlock / add — primary path)
+
+### External users (plugin-bundled — preferred)
+
+After installing the marketplace plugin and reloading Cursor:
+
+```bash
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup    # create + unlock (hidden passphrase)
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" unlock   # writes session file
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set      # prompts for name, then hidden value
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set GITHUB_TOKEN --tags api,github
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" list     # names / tags only
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" status
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" lock
+```
+
+If `vault_onboard` returns an absolute path to `cli.js`, prefer that paste command (Terminal does not always expand `CURSOR_PLUGIN_ROOT`).
+
+### Contributors (optional clone)
 
 ```bash
 git clone https://github.com/vishnutvm/password-space.git
 cd password-space
 pnpm install && pnpm build
-
-pnpm password-space setup         # create + unlock (hidden passphrase)
-pnpm password-space unlock        # writes session file
-pnpm password-space set           # prompts for name, then hidden value
-pnpm password-space set GITHUB_TOKEN --tags api,github
-pnpm password-space list          # names / tags only
-pnpm password-space status
-pnpm password-space lock
+pnpm password-space setup
 ```
 
 ### How `set` reads the secret value
@@ -107,10 +123,10 @@ pnpm password-space lock
 Prefer piping from a protected source rather than putting a real token on the command line:
 
 ```bash
-printf '%s' "$GITHUB_TOKEN" | pnpm password-space set GITHUB_TOKEN --tags api,github
+printf '%s' "$GITHUB_TOKEN" | node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set GITHUB_TOKEN --tags api,github
 ```
 
-`pnpm build` also regenerates the marketplace MCP bundle at `plugins/password-space/dist/index.js`.
+`pnpm build` regenerates the marketplace bundles at `plugins/password-space/dist/index.js` (MCP) and `plugins/password-space/dist/cli.js` (Terminal CLI).
 
 ### Throwaway demo
 

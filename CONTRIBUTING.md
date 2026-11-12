@@ -19,16 +19,16 @@ pnpm test
 
 Requires **Node.js ≥ 20** (uses built-in `node:sqlite`).
 
-After changing MCP or vault sources, `pnpm build` rebuilds packages and rebundles `plugins/password-space/dist/index.js` for marketplace installs.
+After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and rebundles `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal CLI) for marketplace installs. External users must not need a clone for setup/set/unlock.
 
 ## Package layout
 
 | Path | Role |
 | --- | --- |
 | `packages/vault` | Crypto, SQLite store, session, redact, inject |
-| `packages/cli` | Human CLI |
+| `packages/cli` | Human CLI (also bundled to plugin `dist/cli.js`) |
 | `packages/mcp-server` | MCP tools for agents |
-| `plugins/password-space` | Cursor plugin (bundled MCP + skill + hooks + logo) |
+| `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |
 | `skills/password-space` | Convenience Skill mirror |
 | `hooks/` | Standalone redaction utility + hook examples |
 

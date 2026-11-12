@@ -1,6 +1,6 @@
 # Password Space for everyone
 
-**Install · One-time Setup · Start Using** — no secrets in chat, no `mcp.json` edits.
+**Install · One-time Setup · Start Using** — no secrets in chat, no `mcp.json` edits, **no repo clone**.
 
 Encrypted vault on your Mac. Your agent uses tokens without pasting them into the conversation.
 
@@ -25,16 +25,23 @@ Some Cursor builds approve `vault_init` with empty `{}` and **no passphrase fiel
 3. Install **password-space**
 4. **Reload Window** (Cmd+Shift+P → *Developer: Reload Window*)
 
-Requires **Node.js 20+** on your Mac (`node -v`). The plugin MCP uses Node's built-in SQLite.
+Requires **Node.js 20+** on your Mac (`node -v`). The plugin MCP and Terminal CLI use Node's built-in SQLite.
 
-### 2. Create your vault (Terminal)
+### 2. Create your vault (Terminal — no clone)
 
 1. In chat: **`/setup-password-space`**
 2. Agent calls **`vault_onboard`** → follow the single **`primary_action`**
-3. Open **Terminal** and paste **`copy_paste_command`** (typically from a clone: `pnpm password-space setup`)
+3. Open **Terminal** and paste **`copy_paste_command`**. Typical form after plugin install:
+
+```bash
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
+```
+
+(If the agent shows an absolute path to `…/dist/cli.js`, use that — same binary.)
+
 4. Type your passphrase at the **hidden** prompts (8+ characters)
 
-Do **not** approve empty `{}` in Cursor.
+Do **not** approve empty `{}` in Cursor. Do **not** clone the repo for day-1 setup.
 
 #### Optional: MCP Environment (skip Terminal passphrase)
 
@@ -45,8 +52,7 @@ You do **not** edit `mcp.json`. You do **not** need to understand MCP. Vault hom
 ### 3. Add a secret + use
 
 ```bash
-# From your password-space clone (after pnpm install && pnpm build):
-pnpm password-space set
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
 # prompts: Secret name → Value for NAME (hidden)
 ```
 
@@ -61,7 +67,8 @@ pnpm password-space set
 | Node too old / MCP won't start | Install Node **20+**, reload Cursor, run `/setup-password-space` again |
 | `passphrase_missing` / empty `{}` | **Stop retrying.** Run the Terminal `copy_paste_command`, or set `PASSWORD_SPACE_PASSPHRASE` |
 | Agent says reply "ready" then vault_init | Outdated skill — follow `primary_action` (Terminal first) |
-| "Vault already initialized" | Unlock via Terminal `pnpm password-space unlock` — do not re-init |
+| Agent asks you to clone the repo | Outdated guidance — use plugin `dist/cli.js` instead |
+| "Vault already initialized" | Unlock via Terminal `…/dist/cli.js unlock` — do not re-init |
 | "Vault locked" after restart | Terminal unlock, or MCP Environment + `vault_unlock` |
 | Mid-setup interruption | Run **`/setup-password-space`** again — `vault_onboard` resumes from current state |
 | Reinstall plugin | [FRESH_INSTALL_VERIFY.md](./FRESH_INSTALL_VERIFY.md) |
