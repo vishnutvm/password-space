@@ -30137,6 +30137,16 @@ function assertUnlocked(store) {
   }
 }
 
+// packages/mcp-server/src/with-store.ts
+async function withVaultStore(dataDir2, fn) {
+  const store = openVault({ dataDir: dataDir2, useSession: true });
+  try {
+    return await fn(store);
+  } finally {
+    store.close();
+  }
+}
+
 // packages/mcp-server/src/index.ts
 var VAULT_MANAGER_UI = "ui://password-space/vault-manager.html";
 var FALLBACK_VAULT_MANAGER_HTML = `<!DOCTYPE html><html><body><p>Password Space Vault Manager UI is not bundled. Use vault_status / list_secrets / CLI \u2014 do not paste App source into chat.</p></body></html>`;
@@ -30163,14 +30173,6 @@ function loadVaultManagerHtml() {
   return FALLBACK_VAULT_MANAGER_HTML;
 }
 var dataDir = defaultDataDir();
-function withStore(fn) {
-  const store = openVault({ dataDir, useSession: true });
-  try {
-    return fn(store);
-  } finally {
-    store.close();
-  }
-}
 var passphraseSchema = external_exports.string().min(8, "Passphrase must be at least 8 characters.").describe(
   "Your vault passphrase (8+ characters). Enter here in the MCP approval form \u2014 do not paste into chat. Optional if PASSWORD_SPACE_PASSPHRASE is set in MCP Environment."
 );
@@ -30189,7 +30191,7 @@ server.registerTool(
   },
   async () => {
     try {
-      return withStore((store) => vaultOnboardTool(store, dataDir));
+      return await withVaultStore(dataDir, (store) => vaultOnboardTool(store, dataDir));
     } catch (err) {
       return errorResult(err);
     }
@@ -30203,7 +30205,7 @@ server.registerTool(
   },
   async () => {
     try {
-      return withStore((store) => vaultStatusTool(store, dataDir));
+      return await withVaultStore(dataDir, (store) => vaultStatusTool(store, dataDir));
     } catch (err) {
       return errorResult(err);
     }
@@ -30218,7 +30220,7 @@ server.registerTool(
   },
   async ({ passphrase }) => {
     try {
-      return await withStore((store) => vaultInitTool(store, dataDir, { passphrase }));
+      return await withVaultStore(dataDir, (store) => vaultInitTool(store, dataDir, { passphrase }));
     } catch (err) {
       return errorResult(err);
     }
@@ -30290,7 +30292,7 @@ server.registerTool(
   },
   async ({ name }) => {
     try {
-      return withStore((store) => vaultDeleteSecretTool(store, name));
+      return await withVaultStore(dataDir, (store) => vaultDeleteSecretTool(store, name));
     } catch (err) {
       return errorResult(err);
     }
@@ -30310,7 +30312,7 @@ K3(
   },
   async () => {
     try {
-      const result = withStore((store) => vaultManagerTool(store, dataDir));
+      const result = await withVaultStore(dataDir, (store) => vaultManagerTool(store, dataDir));
       return {
         ...result,
         _meta: {
@@ -30363,7 +30365,8 @@ server.registerTool(
   },
   async ({ name, value, tags, notes }) => {
     try {
-      return withStore(
+      return await withVaultStore(
+        dataDir,
         (store) => vaultSetSecretTool(store, { name, value, tags, notes })
       );
     } catch (err) {
@@ -30379,7 +30382,7 @@ server.tool(
   },
   async ({ tag }) => {
     try {
-      return withStore((store) => listSecretsTool(store, tag));
+      return await withVaultStore(dataDir, (store) => listSecretsTool(store, tag));
     } catch (err) {
       return errorResult(err);
     }
@@ -30393,7 +30396,7 @@ server.tool(
   },
   async ({ name }) => {
     try {
-      return withStore((store) => getSecretMetadataTool(store, name));
+      return await withVaultStore(dataDir, (store) => getSecretMetadataTool(store, name));
     } catch (err) {
       return errorResult(err);
     }
@@ -30408,7 +30411,7 @@ server.tool(
   },
   async ({ name, env_var }) => {
     try {
-      return withStore((store) => injectSecretTool(store, dataDir, { name, env_var }));
+      return await withVaultStore(dataDir, (store) => injectSecretTool(store, dataDir, { name, env_var }));
     } catch (err) {
       return errorResult(err);
     }
@@ -30423,7 +30426,8 @@ server.tool(
   },
   async ({ name, confirm_redaction }) => {
     try {
-      return withStore(
+      return await withVaultStore(
+        dataDir,
         (store) => resolveSecretTool(store, { name, confirm_redaction: confirm_redaction === true })
       );
     } catch (err) {
