@@ -1,6 +1,6 @@
 # Password Space
 
-**A private credential vault for Cursor** — encrypted on your Mac, designed so agents never need your secrets in chat.
+**A local named secret store for Cursor** — plain files on your Mac, designed so agents never need your secrets in chat.
 
 [Getting started in 2 minutes](../../docs/onboarding.md)
 
@@ -8,10 +8,10 @@
 
 | Piece | Purpose |
 | --- | --- |
-| MCP server (`dist/index.js`) | Status, list, inject, lock after unlock |
-| Terminal CLI (`dist/cli.js`) | **Sole human UX** — interactive menu + setup / unlock / add / remove / lock (hidden prompts) — **bundled; no clone** |
+| MCP server (`dist/index.js`) | Status, list, inject by name |
+| Terminal CLI (`dist/cli.js`) | **Sole human UX** — interactive menu + setup / add / remove (hidden value prompts) — **bundled; no clone** |
 | Skill + `/setup-password-space` | Guided setup — Terminal-only |
-| Hooks | Gentle welcome when no vault yet; redaction before send |
+| Hooks | Gentle welcome when no store yet; redaction before send |
 
 ## After install
 
@@ -20,19 +20,19 @@
    ```bash
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
    ```
-   Choose unlock duration (**1 day** / **1 week** / **until lock**). Passphrase is typed there, hidden. **No git clone.**
+   No passphrase. **No git clone.**
 3. Add a credential (or open the menu with no subcommand):
    ```bash
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"        # interactive menu
    ```
-4. Back in Cursor: `vault_status` / `list_secrets` / `inject_secret`. Never approve empty `{}` when Cursor shows no passphrase field.
+4. Back in Cursor: ask the agent to use the secret **by name** via `inject_secret` / `list_secrets`.
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
-**Trust:** Local encryption. Passphrases and tokens stay out of the conversation. Unlock session: `~/.password-space/session` (0600).
+**Trust:** Secrets stay local as plain files (`~/.password-space/secrets.json`, mode 0600). Values never belong in chat. Lock/unlock not needed.
 
-Default vault folder: `~/.password-space`. Optional override: a real absolute `PASSWORD_SPACE_HOME` in the process environment or MCP Environment (never an unresolved `${PASSWORD_SPACE_HOME}`).
+Default store folder: `~/.password-space`. Optional override: a real absolute `PASSWORD_SPACE_HOME` in the process environment or MCP Environment (never an unresolved `${PASSWORD_SPACE_HOME}`).
 
 ## MCP tools (essentials)
 
@@ -40,10 +40,11 @@ Default vault folder: `~/.password-space`. Optional override: a real absolute `P
 | --- | --- |
 | `vault_onboard` | No — start here (`primary_action` only) |
 | `vault_status` / `list_secrets` | No |
-| `inject_secret` | No — **preferred** for agents |
-| `vault_lock` | No |
-| `vault_manager` | No — status-only; **do not** use for create/add |
+| `inject_secret` | No — **preferred** for agents (by name) |
+| `vault_manager` | No — status-only; **do not** use for add |
 
-More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [zero-friction-v1.md](../../docs/zero-friction-v1.md). CLI details: [root README](../../README.md).
+`vault_init` / `vault_unlock` / `vault_lock` may still appear for compatibility — they are **not** required.
+
+More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [plain-text store note](../../docs/onboarding.md). CLI details: [root README](../../README.md).
 
 MIT

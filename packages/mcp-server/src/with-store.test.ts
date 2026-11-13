@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { openVault } from "@password-space/vault";
 import { vaultInitTool, vaultUnlockTool } from "./tools.js";
 import { withVaultStore } from "./with-store.js";
 
@@ -21,56 +20,31 @@ function tempDir(): string {
   return dir;
 }
 
-/**
- * Reproduces the pre-fix MCP App Create-vault race:
- * sync withStore closed the DB when vaultInitTool returned a Promise,
- * then await store.init hit node:sqlite "database is not open".
- */
-function withStoreBrokenSyncClose<T>(
-  dataDir: string,
-  fn: (store: ReturnType<typeof openVault>) => T,
-): T {
-  const store = openVault({ dataDir, useSession: true });
-  try {
-    return fn(store);
-  } finally {
-    store.close();
-  }
-}
-
 describe("withVaultStore", () => {
-  it("broken sync close surfaces database is not open during vault_init", async () => {
+  it("awaits vault_init so store creation succeeds without unlock", async () => {
     const dir = tempDir();
-    const passphrase = "create-vault-passphrase";
-
-    await expect(
-      withStoreBrokenSyncClose(dir, (store) =>
-        vaultInitTool(store, dir, { passphrase }),
-      ),
-    ).rejects.toThrow(/database is not open/i);
-  });
-
-  it("awaits vault_init so Create vault (App UI) succeeds", async () => {
-    const dir = tempDir();
-    const passphrase = "create-vault-passphrase";
 
     const initResult = await withVaultStore(dir, (store) =>
-      vaultInitTool(store, dir, { passphrase }),
+      vaultInitTool(store, dir, {}),
     );
     const initParsed = JSON.parse(initResult.content[0]!.text) as {
       ok: boolean;
       initialized: boolean;
+      lock_unlock_needed: boolean;
     };
     expect(initParsed.ok).toBe(true);
     expect(initParsed.initialized).toBe(true);
+    expect(initParsed.lock_unlock_needed).toBe(false);
 
-    const unlockResult = await vaultUnlockTool(dir, { passphrase, ttl_hours: 1 });
+    const unlockResult = await vaultUnlockTool(dir, {});
     const unlockParsed = JSON.parse(unlockResult.content[0]!.text) as {
       ok: boolean;
       unlocked: boolean;
+      deprecated: boolean;
     };
     expect(unlockParsed.ok).toBe(true);
     expect(unlockParsed.unlocked).toBe(true);
+    expect(unlockParsed.deprecated).toBe(true);
 
     const status = await withVaultStore(dir, (store) => {
       expect(store.isInitialized()).toBe(true);

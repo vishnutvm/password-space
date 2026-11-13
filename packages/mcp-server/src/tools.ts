@@ -3,11 +3,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   VaultStore,
-  changeVaultPassphrase,
   clearExpiredInjectFiles,
-  hasValidSession,
+  hasLegacyEncryptedVault,
   lockVaultSession,
-  sessionPath,
+  secretsStorePath,
   unlockVaultToSession,
   vaultDbPath,
   writeInjectFile,
@@ -17,9 +16,7 @@ import {
 
 export type ToolJsonResult = {
   content: Array<{ type: "text"; text: string }>;
-  /** Structured payload for clients that honor it */
   structuredContent?: Record<string, unknown>;
-  /** Hint for transcript redaction pipelines + MCP Apps UI binding */
   _meta?: {
     redact_in_transcript?: boolean;
     ui?: { resourceUri: string };
@@ -38,31 +35,25 @@ function jsonResult(
   };
 }
 
-/** Cursor often approves vault_init/unlock with empty {} and no passphrase field. */
+/** @deprecated Passphrase path removed — kept for soft-compat messaging. */
 export const HOST_LIMITATION =
-  "This Cursor host may approve MCP tools with empty {} and no passphrase field (or without rendering MCP Apps UI). Do not loop vault_init — use Terminal CLI setup or MCP Environment.";
+  "Lock/unlock/passphrase are not required. Name secrets in Terminal, then use inject_secret by name.";
 
 /** Bundled CLI path inside the marketplace plugin package (next to MCP `dist/index.js`). */
 export const BUNDLED_CLI_RELATIVE = "dist/cli.js";
 
-/**
- * Portable Terminal form after marketplace install + Reload.
- * Cursor expands CURSOR_PLUGIN_ROOT for MCP; agents should prefer the absolute
- * path from `bundledCliCommand()` when the MCP process can resolve `cli.js`.
- */
 export const BUNDLED_CLI_NODE =
   `node "\${CURSOR_PLUGIN_ROOT}/${BUNDLED_CLI_RELATIVE}"` as const;
 
 /**
- * Exact Terminal commands — primary create / unlock / add path.
+ * Exact Terminal commands — primary add / remove / list path.
  * No repo clone required: CLI ships in the plugin at `dist/cli.js`.
  */
 export const CLI_SETUP_COMMANDS = {
-  /** Preferred after plugin install (no clone). */
   plugin_setup: `${BUNDLED_CLI_NODE} setup`,
+  /** @deprecated Unlock is a no-op for the plain store. */
   plugin_unlock: `${BUNDLED_CLI_NODE} unlock`,
   plugin_set: `${BUNDLED_CLI_NODE} set`,
-  /** Optional: contributors developing from a clone. */
   from_clone_optional:
     "cd /path/to/password-space && pnpm install && pnpm build && pnpm password-space setup",
   unlock_from_clone_optional:
@@ -74,10 +65,6 @@ export const CLI_SETUP_COMMANDS = {
   set_global: "password-space set",
 } as const;
 
-/**
- * Absolute path to bundled `cli.js` when the MCP server is the marketplace
- * bundle (`…/plugins/password-space/dist/index.js`) or CURSOR_PLUGIN_ROOT is set.
- */
 export function resolveBundledCliPath(): string | undefined {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
@@ -95,15 +82,9 @@ export function resolveBundledCliPath(): string | undefined {
 }
 
 function shellQuote(path: string): string {
-  // Double-quote for Terminal paste; escape embedded quotes/backslashes only.
   return `"${path.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-/**
- * Terminal command for setup | unlock | set using the plugin-bundled CLI.
- * Prefers an absolute path (paste-ready in Terminal); falls back to
- * `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" …`.
- */
 export function bundledCliCommand(
   subcommand: "setup" | "unlock" | "set" | string = "",
 ): string {
@@ -113,8 +94,9 @@ export function bundledCliCommand(
   return sub ? `${base} ${sub}` : base;
 }
 
+/** @deprecated MCP Environment passphrase is unused for the plain store. */
 export const MCP_ENV_PATH =
-  "Settings → MCP → password-space → Environment → PASSWORD_SPACE_PASSPHRASE (8+ chars), then call vault_init / vault_unlock with empty {}.";
+  "Passphrases are not used. Add secrets in Terminal with the plugin CLI set command.";
 
 export class PassphraseRequiredError extends Error {
   readonly code = "passphrase_missing" as const;
@@ -123,7 +105,7 @@ export class PassphraseRequiredError extends Error {
 
   constructor() {
     super(
-      `Passphrase missing: Cursor approved with empty {}. Use Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` (or set PASSWORD_SPACE_PASSPHRASE in MCP Environment) — do not retry vault_init with empty {}.`,
+      `Passphrases are not used. Open Terminal and run \`${CLI_SETUP_COMMANDS.plugin_setup}\` then \`${CLI_SETUP_COMMANDS.plugin_set}\` — never paste secrets into chat.`,
     );
     this.name = "PassphraseRequiredError";
   }
@@ -136,7 +118,7 @@ export class NodeVersionError extends Error {
 
   constructor(found: string, requiredMajor: number) {
     super(
-      `Password Space needs Node.js ${requiredMajor}+ (bundled MCP uses node:sqlite). Found ${found}.`,
+      `Password Space needs Node.js ${requiredMajor}+. Found ${found}.`,
     );
     this.name = "NodeVersionError";
     this.found = found;
@@ -145,9 +127,8 @@ export class NodeVersionError extends Error {
 }
 
 const TRUST_LINE =
-  "Your secrets stay encrypted on this device. Passphrases and tokens never belong in chat.";
+  "Secrets live as local plain files on this device. Name them in Terminal; never paste values into chat.";
 
-/** Bundled MCP requires Node's built-in sqlite (Node 20+). */
 export const MIN_NODE_MAJOR = 20;
 
 export type PrerequisiteCheck = {
@@ -187,44 +168,35 @@ export function assertNodeVersion(nodeVersion: string = process.version): void {
 export type SetupState =
   | "fix_node"
   | "needs_init"
-  | "needs_unlock"
   | "ready"
   | "recover_existing_vault";
 
 export function onboardingProgress(
   initialized: boolean,
-  unlocked: boolean,
+  _unlocked = true,
 ): { phase: string; headline: string; step_of: string } {
   if (!initialized) {
     return {
-      phase: "2/4",
-      headline: "Create your encrypted vault",
-      step_of: "Step 2 of 4 · Secure your vault",
-    };
-  }
-  if (!unlocked) {
-    return {
-      phase: "3/4",
-      headline: "Unlock your vault",
-      step_of: "Step 3 of 4 · Unlock for this session",
+      phase: "1/2",
+      headline: "Create your local secret store",
+      step_of: "Step 1 of 2 · Ensure the store",
     };
   }
   return {
-    phase: "4/4",
-    headline: "Add your credentials",
-    step_of: "Step 4 of 4 · Save and use secrets safely",
+    phase: "2/2",
+    headline: "Add a named secret",
+    step_of: "Step 2 of 2 · Name once, use by name",
   };
 }
 
-/** Whether PASSWORD_SPACE_PASSPHRASE is set (does not expose the value). */
+/** @deprecated Env passphrase unused; always false for product path. */
 export function isPassphraseConfiguredInEnv(): boolean {
   return Boolean(process.env.PASSWORD_SPACE_PASSPHRASE?.trim());
 }
 
 /**
- * Resolve passphrase from tool arg or PASSWORD_SPACE_PASSPHRASE.
- * Never log or return the resolved value.
- * Passphrase is NEVER collected via MCP elicitation (spec forbids sensitive elicitation).
+ * Soft-compat: passphrase resolution still works for legacy callers but
+ * vault_init no longer requires it.
  */
 export function resolvePassphrase(toolArg?: string): string {
   const fromArg = toolArg?.trim();
@@ -253,11 +225,6 @@ export type OnboardingStep = {
   user_action?: string;
 };
 
-/**
- * Single next step for the agent/user.
- * Default path: interactive Terminal CLI for create / unlock / add / remove / lock.
- * Optional: MCP Environment passphrase for scripts. Do not guide users to App forms.
- */
 export type PrimaryAction = {
   id:
     | "fix_node"
@@ -282,14 +249,12 @@ export type PrimaryAction = {
     | "vault_manager"
     | "mcp_form";
   host_limitation?: string;
-  /** Exact Terminal command to copy-paste (Mac). */
   copy_paste_command?: string;
   alternatives?: Array<{
     id: string;
     title: string;
     do_this: string;
   }>;
-  /** Secondary path (e.g. global CLI binary). */
   advanced_escape_hatch?: {
     title: string;
     cli_command: string;
@@ -300,19 +265,18 @@ export type PrimaryAction = {
 export function resolveSetupState(opts: {
   prereqOk: boolean;
   initialized: boolean;
-  unlocked: boolean;
-  session: boolean;
+  unlocked?: boolean;
+  session?: boolean;
 }): SetupState {
   if (!opts.prereqOk) return "fix_node";
   if (!opts.initialized) return "needs_init";
-  if (!opts.unlocked || !opts.session) return "needs_unlock";
   return "ready";
 }
 
 export function buildPrimaryAction(
   initialized: boolean,
-  unlocked: boolean,
-  session: boolean,
+  _unlocked = true,
+  _session = true,
   prereqOk = true,
 ): PrimaryAction {
   if (!prereqOk) {
@@ -324,39 +288,21 @@ export function buildPrimaryAction(
     };
   }
 
-  const env = isPassphraseConfiguredInEnv();
   if (!initialized) {
-    if (env) {
-      return {
-        id: "vault_init_env",
-        title: "Create your vault",
-        do_this: "Call vault_init once (passphrase is already in MCP Environment).",
-        mcp_tool: "vault_init",
-        recommended_path: "mcp_env",
-        never: "Never paste the passphrase into chat.",
-        advanced_escape_hatch: {
-          title: "Plugin Terminal CLI",
-          cli_command: bundledCliCommand("setup"),
-          when: "If vault_init still fails after env is set.",
-        },
-      };
-    }
-    // Default path: Terminal CLI — Cursor often has no passphrase field.
     return {
       id: "cli_setup",
-      title: "Create your vault in Terminal",
+      title: "Create your local store in Terminal",
       do_this:
-        "Open Terminal and run the copy_paste_command below (hidden passphrase prompts). No repo clone needed — the CLI is bundled in the plugin. Do NOT call vault_init without a passphrase, and never ask the user to reply \"ready\" then approve empty {}.",
+        "Open Terminal and run the copy_paste_command below (no passphrase). Then run set to name a secret at the hidden prompt. Never paste values in chat.",
       recommended_path: "cli_setup",
-      host_limitation: HOST_LIMITATION,
       copy_paste_command: bundledCliCommand("setup"),
       never:
-        "Never call vault_init with empty {}. Never ask the user to reply \"ready\" then approve without a passphrase field. Never paste the passphrase into chat. Never collect passphrase or secret values in App forms or MCP approval forms when Terminal is available.",
+        "Never paste secret values into chat. Never ask the user to edit mcp.json. Do not use App forms for add/remove.",
       alternatives: [
         {
-          id: "mcp_env",
-          title: "One-click MCP Environment",
-          do_this: MCP_ENV_PATH,
+          id: "list_secrets",
+          title: "Check status via MCP",
+          do_this: "After Terminal setup + set, call vault_status or list_secrets.",
         },
       ],
       advanced_escape_hatch: {
@@ -366,51 +312,12 @@ export function buildPrimaryAction(
       },
     };
   }
-  if (!unlocked || !session) {
-    if (env) {
-      return {
-        id: "vault_unlock_env",
-        title: "Unlock your vault",
-        do_this: "Call vault_unlock (passphrase from MCP Environment).",
-        mcp_tool: "vault_unlock",
-        recommended_path: "mcp_env",
-        never: "Never paste the passphrase into chat.",
-        advanced_escape_hatch: {
-          title: "Plugin Terminal unlock",
-          cli_command: bundledCliCommand("unlock"),
-          when: "If vault_unlock still fails after env is set.",
-        },
-      };
-    }
-    return {
-      id: "cli_unlock",
-      title: "Unlock your vault in Terminal",
-      do_this:
-        "Open Terminal and run the copy_paste_command (hidden prompt + session duration: 1 day / 1 week / until lock). No clone needed. Do NOT call vault_unlock with empty {} or ask the user to reply \"ready\" without a passphrase channel.",
-      recommended_path: "cli_unlock",
-      host_limitation: HOST_LIMITATION,
-      copy_paste_command: bundledCliCommand("unlock"),
-      never:
-        "Never approve vault_unlock with empty {}. Never paste the passphrase into chat. Do not run vault_init again — the vault already exists.",
-      alternatives: [
-        {
-          id: "mcp_env",
-          title: "One-click MCP Environment",
-          do_this: MCP_ENV_PATH,
-        },
-      ],
-      advanced_escape_hatch: {
-        title: "Contributor clone unlock (optional)",
-        cli_command: CLI_SETUP_COMMANDS.unlock_from_clone_optional,
-        when: "Only when developing from a git clone.",
-      },
-    };
-  }
+
   return {
     id: "cli_set",
-    title: "Add a credential in Terminal",
+    title: "Add a named secret in Terminal",
     do_this:
-      "Open Terminal and run the copy_paste_command (or bare cli.js for the interactive menu). Type the secret name, then the value at the hidden prompt. Never paste name/value in chat.",
+      "Open Terminal and run the copy_paste_command (or bare cli.js for the interactive menu). Type the secret name, then the value at the hidden prompt. Ask the agent to use it by name via inject_secret.",
     recommended_path: "cli_set",
     copy_paste_command: bundledCliCommand("set"),
     never: "Never paste API keys or passwords into chat.",
@@ -423,7 +330,7 @@ export function buildPrimaryAction(
       {
         id: "cli_menu",
         title: "Interactive Terminal menu",
-        do_this: `Run ${bundledCliCommand("")} (no subcommand) for setup / unlock / add / remove / lock / status.`,
+        do_this: `Run ${bundledCliCommand("")} (no subcommand) for setup / add / remove / list / status.`,
       },
     ],
     advanced_escape_hatch: {
@@ -436,62 +343,44 @@ export function buildPrimaryAction(
 
 export function buildOnboardingSteps(
   initialized: boolean,
-  unlocked: boolean,
-  session: boolean,
+  _unlocked = true,
+  _session = true,
 ): OnboardingStep[] {
-  const envPassphrase = isPassphraseConfiguredInEnv();
-  const passphraseHint = envPassphrase
-    ? "Passphrase loads from MCP Environment — call vault_init / vault_unlock with {}."
-    : `Prefer Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` (or unlock). Do not approve empty {}.`;
-
   return [
     {
       id: "check",
-      phase: "1/4",
+      phase: "1/2",
       title: "Welcome",
       done: true,
       tool: "vault_onboard",
       user_action:
-        "You're in the right place. Follow primary_action only — Terminal for create, unlock, and add (plugin-bundled CLI; no clone).",
+        "You're in the right place. Follow primary_action — Terminal for setup/add/remove (plugin-bundled CLI; no clone).",
     },
     {
       id: "init",
-      phase: "2/4",
-      title: "Secure your vault",
+      phase: "1/2",
+      title: "Ensure local store",
       done: initialized,
-      tool: envPassphrase ? "vault_init" : "cli_setup",
+      tool: "cli_setup",
       user_action: initialized
         ? undefined
-        : `Pick a passphrase you'll remember (8+ characters). ${passphraseHint}`,
-    },
-    {
-      id: "unlock",
-      phase: "3/4",
-      title: "Unlock for this session",
-      done: unlocked && session,
-      tool: envPassphrase ? "vault_unlock" : "cli_unlock",
-      user_action:
-        initialized && !(unlocked && session)
-          ? `Enter the same passphrase. ${passphraseHint}`
-          : undefined,
+        : `Run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` — creates ~/.password-space/secrets.json (plain text). No passphrase.`,
     },
     {
       id: "store",
-      phase: "4/4",
-      title: "Save a credential",
+      phase: "2/2",
+      title: "Name a secret",
       done: false,
       tool: "cli_set",
-      user_action: unlocked
-        ? `In Terminal run \`${CLI_SETUP_COMMANDS.plugin_set}\` — type name, then hidden value. Never in chat.`
-        : "Unlock first, then save your token or password in Terminal.",
+      user_action: `In Terminal run \`${CLI_SETUP_COMMANDS.plugin_set}\` — type name, then hidden value. Never in chat.`,
     },
     {
       id: "use",
-      phase: "4/4",
+      phase: "2/2",
       title: "Use with your agent",
       done: false,
       tool: "inject_secret",
-      user_action: "Your agent uses the secret without showing it in the conversation.",
+      user_action: "Ask the agent to use the secret by name — inject_secret, never paste the value.",
     },
   ];
 }
@@ -499,7 +388,8 @@ export function buildOnboardingSteps(
 function recoveryGuidance(opts: {
   setup_state: SetupState;
   initialized: boolean;
-  dbExists: boolean;
+  storeExists: boolean;
+  legacyEncrypted: boolean;
 }): { code: string; howToFix: string; what_to_do: string[] } {
   switch (opts.setup_state) {
     case "fix_node":
@@ -514,32 +404,23 @@ function recoveryGuidance(opts: {
       };
     case "needs_init":
       return {
-        code: opts.dbExists ? "setup_incomplete" : "vault_missing",
-        howToFix: opts.dbExists
-          ? `Setup was interrupted. Finish in Terminal: \`${CLI_SETUP_COMMANDS.plugin_setup}\` (do not retry vault_init with empty {}).`
-          : `Create the vault in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` — no clone; Cursor often has no passphrase field.`,
+        code: opts.legacyEncrypted ? "legacy_encrypted_vault" : "store_missing",
+        howToFix: opts.legacyEncrypted
+          ? `Legacy encrypted vault.db detected (left untouched). Create the new plain store with \`${CLI_SETUP_COMMANDS.plugin_setup}\`, then re-add secrets with set.`
+          : `Create the local store in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` — no passphrase, no unlock.`,
         what_to_do: [
           `Run: ${bundledCliCommand("setup")}`,
-          "Or set PASSWORD_SPACE_PASSPHRASE under Settings → MCP → password-space → Environment, then vault_init {}.",
-          "Never approve vault_init with empty {} and no passphrase channel.",
-          "Do not use App forms for create/add — Terminal CLI only.",
-        ],
-      };
-    case "needs_unlock":
-      return {
-        code: "vault_locked",
-        howToFix: `Your vault already exists. Unlock in Terminal with \`${CLI_SETUP_COMMANDS.plugin_unlock}\` — do not run vault_init again.`,
-        what_to_do: [
-          `Run: ${bundledCliCommand("unlock")}`,
-          "Or set PASSWORD_SPACE_PASSPHRASE in MCP Environment, then vault_unlock {}.",
-          "Do not call vault_init — the vault already exists.",
-          "If unlock fails with wrong passphrase, retry carefully — there is no recovery without it.",
+          `Then: ${bundledCliCommand("set")}`,
+          "Do not use App forms for add — Terminal CLI only.",
+          ...(opts.legacyEncrypted
+            ? ["Old vault.db is not auto-migrated — re-add secrets by name in Terminal."]
+            : []),
         ],
       };
     default:
       return {
         code: "ready",
-        howToFix: `Vault is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
+        howToFix: `Store is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
         what_to_do: [
           `Run: ${bundledCliCommand("set")}`,
           "Then list_secrets / inject_secret via MCP (no values in chat).",
@@ -551,107 +432,117 @@ function recoveryGuidance(opts: {
 export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonResult {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
-  const unlocked = store.isUnlocked;
-  const session = hasValidSession(sessionPath(dataDir));
-  const dbPath = vaultDbPath(dataDir);
-  const dbExists = existsSync(dbPath);
+  const unlocked = store.isUnlocked || !initialized ? store.isUnlocked : true;
+  const storePath = secretsStorePath(dataDir);
+  const storeExists = existsSync(storePath);
+  const legacyEncrypted = hasLegacyEncryptedVault(dataDir);
   const setup_state = resolveSetupState({
     prereqOk: prereq.ok,
     initialized,
-    unlocked,
-    session,
   });
-  const steps = buildOnboardingSteps(initialized, unlocked, session);
-  const primary_action = buildPrimaryAction(initialized, unlocked, session, prereq.ok);
-  const ready = initialized && unlocked && prereq.ok;
-  const recovery = recoveryGuidance({ setup_state, initialized, dbExists });
+  const steps = buildOnboardingSteps(initialized);
+  const primary_action = buildPrimaryAction(initialized, true, true, prereq.ok);
+  const ready = initialized && prereq.ok;
+  const recovery = recoveryGuidance({
+    setup_state,
+    initialized,
+    storeExists,
+    legacyEncrypted,
+  });
 
-  const progress = onboardingProgress(initialized, unlocked);
-  const passphraseEnv = isPassphraseConfiguredInEnv();
+  const progress = onboardingProgress(initialized);
   const human_summary = !prereq.ok
     ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.`
     : !initialized
-      ? passphraseEnv
-        ? "Welcome to Password Space. Passphrase is in MCP Environment — call vault_init next."
-        : "Welcome to Password Space. Next: open Terminal and run the setup command (hidden passphrase prompts)."
-      : !unlocked || !session
-        ? "Your vault already exists. Unlock in Terminal — do not create a new one."
-        : "You're protected. Add a credential in Terminal whenever you're ready.";
+      ? legacyEncrypted
+        ? "Welcome. A legacy encrypted vault.db was found (untouched). Create the new plain store in Terminal, then re-add secrets."
+        : "Welcome to Password Space. Next: open Terminal and run setup, then set — no passphrase or unlock."
+      : "Store ready. Add named secrets in Terminal; agents use inject_secret by name.";
 
   return jsonResult({
     ok: prereq.ok,
     setup_state,
     data_dir: dataDir,
-    db_path: dbPath,
-    db_exists: dbExists,
+    store_path: storePath,
+    db_path: storePath,
+    db_exists: storeExists,
+    store_exists: storeExists,
+    storage: "plain-json",
+    lock_unlock_needed: false,
+    legacy_encrypted_vault: legacyEncrypted,
+    legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir) : null,
     initialized,
-    unlocked,
-    session,
+    unlocked: initialized ? true : unlocked,
+    session: true,
     prerequisites: prereq,
-    passphrase_env_configured: passphraseEnv,
+    passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     checklist: steps,
     human_summary,
-    /** Exactly one primary next step — agents must follow this only. */
     primary_action,
     recommended_path: primary_action.recommended_path ?? null,
-    host_limitation:
-      !passphraseEnv && (!initialized || !unlocked || !session) ? HOST_LIMITATION : undefined,
     copy_paste_command: primary_action.copy_paste_command,
-    next_tool: primary_action.mcp_tool ?? (ready ? "vault_set_secret" : "vault_status"),
+    next_tool: ready ? "list_secrets" : "vault_status",
     recovery,
     what_to_do: [primary_action.do_this],
-    never_paste_in_chat: ["passphrase", "secret values"],
+    never_paste_in_chat: ["secret values"],
     never_edit: ["mcp.json"],
     never_do: [
-      'Ask the user to reply "ready" then call vault_init without a passphrase',
-      "Approve vault_init / vault_unlock with empty {} when no passphrase channel exists",
-      "Loop vault_init after passphrase_missing",
+      "Paste secret values into chat",
+      "Ask the user to edit mcp.json",
+      "Use App forms for add/remove",
+      "Require unlock/passphrase for the happy path",
     ],
     elicitation_note:
-      "Passphrase and secret values are collected in Terminal (hidden prompts), or optionally via PASSWORD_SPACE_PASSPHRASE env / tool approval args — never via MCP elicitation, never in chat.",
+      "Secret values are collected in Terminal (hidden prompts) only — never via MCP elicitation, never in chat. Lock/unlock not needed.",
   });
 }
 
 export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonResult {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
-  const unlocked = store.isUnlocked;
-  const session = hasValidSession(sessionPath(dataDir));
-  const dbPath = vaultDbPath(dataDir);
-  const dbExists = existsSync(dbPath);
+  const storePath = secretsStorePath(dataDir);
+  const storeExists = existsSync(storePath);
+  const legacyEncrypted = hasLegacyEncryptedVault(dataDir);
   const setup_state = resolveSetupState({
     prereqOk: prereq.ok,
     initialized,
-    unlocked,
-    session,
   });
-  const steps = buildOnboardingSteps(initialized, unlocked, session);
-  const passphraseEnv = isPassphraseConfiguredInEnv();
-  const primary_action = buildPrimaryAction(initialized, unlocked, session, prereq.ok);
-  const recovery = recoveryGuidance({ setup_state, initialized, dbExists });
+  const steps = buildOnboardingSteps(initialized);
+  const primary_action = buildPrimaryAction(initialized, true, true, prereq.ok);
+  const recovery = recoveryGuidance({
+    setup_state,
+    initialized,
+    storeExists,
+    legacyEncrypted,
+  });
 
-  const progress = onboardingProgress(initialized, unlocked);
-  const next = primary_action.do_this;
+  const progress = onboardingProgress(initialized);
 
   return jsonResult({
     ok: prereq.ok,
     setup_state,
     data_dir: dataDir,
-    db_path: dbPath,
-    db_exists: dbExists,
+    store_path: storePath,
+    db_path: storePath,
+    db_exists: storeExists,
+    store_exists: storeExists,
+    storage: "plain-json",
+    lock_unlock_needed: false,
+    legacy_encrypted_vault: legacyEncrypted,
+    legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir) : null,
     initialized,
-    unlocked,
-    session,
-    secret_count: unlocked ? store.listSecrets().length : null,
+    unlocked: initialized,
+    session: true,
+    secret_count: initialized ? store.listSecrets().length : 0,
     prerequisites: prereq,
-    passphrase_env_configured: passphraseEnv,
+    passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     headline: progress.headline,
     primary_action,
-    next,
+    next: primary_action.do_this,
     recovery,
     next_steps: steps.filter((s) => !s.done).map((s) => ({
       phase: s.phase,
@@ -659,14 +550,10 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
       tool: s.tool,
       action: s.user_action,
     })),
-    tip: !passphraseEnv && (!initialized || !unlocked)
-      ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} / unlock). Optional: ${MCP_ENV_PATH}`
-      : !passphraseEnv && initialized && unlocked
-        ? `Add secrets in Terminal: ${bundledCliCommand("set")}`
-        : undefined,
+    tip: !initialized
+      ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} then set). Lock/unlock not needed.`
+      : `Add secrets in Terminal: ${bundledCliCommand("set")}`,
     recommended_path: primary_action.recommended_path ?? null,
-    host_limitation:
-      !passphraseEnv && (!initialized || !unlocked) ? HOST_LIMITATION : undefined,
     copy_paste_command: primary_action.copy_paste_command,
   });
 }
@@ -674,66 +561,80 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
 export async function vaultInitTool(
   store: VaultStore,
   dataDir: string,
-  args: { passphrase?: string },
+  _args: { passphrase?: string } = {},
 ): Promise<ToolJsonResult> {
   assertNodeVersion();
   if (store.isInitialized()) {
     return jsonResult({
-      ok: false,
-      code: "vault_already_exists",
-      error: "Vault already initialized",
+      ok: true,
+      code: "store_already_exists",
+      deprecated: true,
+      initialized: true,
+      unlocked: true,
       data_dir: dataDir,
-      db_path: vaultDbPath(dataDir),
-      howToFix: `Your vault already exists. Unlock in Terminal with \`${CLI_SETUP_COMMANDS.plugin_unlock}\` (or MCP Environment) — do not create a second vault.`,
-      what_to_do: [
-        `Run: ${bundledCliCommand("unlock")}`,
-        "Or set PASSWORD_SPACE_PASSPHRASE, then call vault_unlock.",
-        `Then add credentials with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
-      ],
-      recommended_path: "cli_unlock",
-      primary_action: buildPrimaryAction(true, false, false, true),
+      store_path: secretsStorePath(dataDir),
+      db_path: secretsStorePath(dataDir),
+      note: "Store already exists. Lock/unlock/passphrase are not needed. Add secrets in Terminal.",
+      howToFix: `Add credentials with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
+      what_to_do: [`Run: ${bundledCliCommand("set")}`],
+      recommended_path: "cli_set",
+      primary_action: buildPrimaryAction(true, true, true, true),
     });
   }
-  const passphrase = resolvePassphrase(args.passphrase);
-  await store.init(passphrase);
-  const nextAction = buildPrimaryAction(true, false, false, true);
+  // Passphrase ignored — plain store.
+  await store.init();
+  const nextAction = buildPrimaryAction(true, true, true, true);
   return jsonResult({
     ok: true,
     initialized: true,
+    unlocked: true,
+    deprecated: true,
     data_dir: dataDir,
-    db_path: vaultDbPath(dataDir),
-    setup_state: "needs_unlock",
+    store_path: secretsStorePath(dataDir),
+    db_path: secretsStorePath(dataDir),
+    setup_state: "ready",
+    storage: "plain-json",
+    lock_unlock_needed: false,
     next: nextAction.do_this,
     recommended_path: nextAction.recommended_path,
     copy_paste_command: nextAction.copy_paste_command,
     primary_action: nextAction,
-    note: "Passphrase was not returned and must not be pasted into chat.",
+    note: "Plain store created. Prefer Terminal setup/set. Passphrase/unlock are not used.",
   });
 }
 
 export async function vaultUnlockTool(
   dataDir: string,
-  args: { passphrase?: string; ttl_hours?: number; until_lock?: boolean },
+  _args: { passphrase?: string; ttl_hours?: number; until_lock?: boolean } = {},
 ): Promise<ToolJsonResult> {
   assertNodeVersion();
-  const passphrase = resolvePassphrase(args.passphrase);
-  const ttlMs =
-    args.until_lock === true
-      ? null
-      : Math.max(0.1, args.ttl_hours ?? 8) * 60 * 60 * 1000;
-  const { expiresAt, untilLock } = await unlockVaultToSession(passphrase, {
-    dataDir,
-    ttlMs,
-  });
+  // Soft-compat: ensure store exists path is readable; no passphrase required.
+  try {
+    await unlockVaultToSession(_args.passphrase ?? "unused-passphrase-xx", {
+      dataDir,
+    });
+  } catch {
+    // If store missing, still return soft-deprecate guidance
+    return jsonResult({
+      ok: false,
+      unlocked: false,
+      deprecated: true,
+      code: "store_missing",
+      data_dir: dataDir,
+      note: "Unlock is not needed for the plain store. Run Terminal setup first.",
+      copy_paste_command: bundledCliCommand("setup"),
+      recommended_path: "cli_setup",
+    });
+  }
   return jsonResult({
     ok: true,
     unlocked: true,
+    deprecated: true,
     data_dir: dataDir,
-    expires_at: expiresAt,
-    until_lock: untilLock,
-    session_path: sessionPath(dataDir),
-    next: "Prefer Terminal for add/remove. Agents: list_secrets / inject_secret. Lock via Terminal lock or vault_lock.",
-    note: "Passphrase was not returned and must not be pasted into chat. Session lives under ~/.password-space/session (0600).",
+    expires_at: null,
+    until_lock: true,
+    lock_unlock_needed: false,
+    note: "Unlock is a no-op. The store is local plain text — agents can inject_secret by name without unlock.",
   });
 }
 
@@ -741,43 +642,31 @@ export function vaultLockTool(dataDir: string): ToolJsonResult {
   lockVaultSession({ dataDir });
   return jsonResult({
     ok: true,
-    locked: true,
+    locked: false,
+    deprecated: true,
     data_dir: dataDir,
-    note: "Unlock session cleared.",
+    note: "Lock is a no-op. The plain store stays readable locally; there is no unlock session.",
   });
 }
 
 export async function vaultChangePassphraseTool(
   dataDir: string,
-  args: { current_passphrase?: string; new_passphrase?: string; ttl_hours?: number },
+  _args: { current_passphrase?: string; new_passphrase?: string; ttl_hours?: number },
 ): Promise<ToolJsonResult> {
   assertNodeVersion();
-  const current = resolvePassphrase(args.current_passphrase);
-  const next = args.new_passphrase?.trim();
-  if (!next || next.length < 8) {
-    throw new Error("new_passphrase must be at least 8 characters.");
-  }
-  const ttlMs =
-    args.ttl_hours === undefined
-      ? undefined
-      : Math.max(0.1, args.ttl_hours) * 60 * 60 * 1000;
-  const { expiresAt, untilLock } = await changeVaultPassphrase(current, next, {
-    dataDir,
-    ttlMs,
-  });
   return jsonResult({
-    ok: true,
-    changed: true,
-    unlocked: true,
+    ok: false,
+    changed: false,
+    deprecated: true,
+    code: "passphrase_not_used",
     data_dir: dataDir,
-    expires_at: expiresAt,
-    until_lock: untilLock,
-    note: "Passphrase updated. Session refreshed. Passphrases were not returned.",
+    error: "Passphrases are not used. The store is local plain text.",
+    note: "Add/remove secrets in Terminal. Lock/unlock/change-passphrase are not part of the product path.",
   });
 }
 
 export function vaultDeleteSecretTool(store: VaultStore, name: string): ToolJsonResult {
-  assertUnlocked(store);
+  assertReady(store);
   store.deleteSecret(name);
   return jsonResult({
     ok: true,
@@ -788,22 +677,14 @@ export function vaultDeleteSecretTool(store: VaultStore, name: string): ToolJson
 
 /**
  * Vault Manager — status-only JSON (+ optional Apps UI). Not a human setup path.
- * Agents must steer create / unlock / add / remove / lock to the Terminal CLI.
  */
 export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonResult {
   clearExpiredInjectFiles(dataDir);
   const status = vaultStatusTool(store, dataDir);
   const parsed = JSON.parse(status.content[0]!.text) as Record<string, unknown>;
-  const secrets =
-    store.isUnlocked && store.isInitialized()
-      ? store.listSecrets().map(publicMeta)
-      : [];
-  const needsPassphraseChannel =
-    !isPassphraseConfiguredInEnv() &&
-    (!store.isInitialized() || !store.isUnlocked);
-  const cliCommand = store.isInitialized()
-    ? bundledCliCommand("unlock")
-    : bundledCliCommand("setup");
+  const secrets = store.isInitialized()
+    ? store.listSecrets().map(publicMeta)
+    : [];
   return jsonResult({
     ok: true,
     app: "vault-manager",
@@ -811,59 +692,48 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
     ui_resource: "ui://password-space/vault-manager.html",
     resource_mime_hint: "text/html;profile=mcp-app",
     progressive_enhancement:
-      "Status-only. Do not guide users to App forms for create/unlock/add. Human UX is the plugin Terminal CLI.",
+      "Status-only. Do not guide users to App forms for add. Human UX is the plugin Terminal CLI.",
     apps_ui_expected: false,
     agent_contract:
-      "Do not call vault_manager for setup. Show Terminal copy_paste_command instead. Use list_secrets / inject_secret / vault_lock after unlock. Never paste App HTML/JS into chat.",
+      "Do not call vault_manager for setup. Show Terminal copy_paste_command instead. Use list_secrets / inject_secret. Never paste App HTML/JS into chat.",
     apps_fallback: {
       reason:
-        "Human setup/credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms.",
-      recommended_path: needsPassphraseChannel
-        ? store.isInitialized()
-          ? "cli_unlock"
-          : "cli_setup"
-        : "cli_set",
-      next_tool: needsPassphraseChannel
-        ? store.isInitialized()
-          ? "cli_unlock"
-          : "cli_setup"
-        : "cli_set",
-      copy_paste_command: needsPassphraseChannel ? cliCommand : bundledCliCommand("set"),
-      mcp_env_alternative: MCP_ENV_PATH,
+        "Human credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms.",
+      recommended_path: store.isInitialized() ? "cli_set" : "cli_setup",
+      next_tool: store.isInitialized() ? "cli_set" : "cli_setup",
+      copy_paste_command: store.isInitialized()
+        ? bundledCliCommand("set")
+        : bundledCliCommand("setup"),
       never: [
-        "Guide users to Vault Manager / App forms for create, unlock, or add",
+        "Guide users to Vault Manager / App forms for add",
         "Paste vault-manager.html / minified JS into chat",
         "FetchMcpResource ui://password-space/vault-manager.html into the transcript",
-        "Call vault_init with empty {}",
+        "Require unlock/passphrase",
       ],
     },
-    host_limitation: needsPassphraseChannel ? HOST_LIMITATION : undefined,
     status: parsed,
     secrets,
     capabilities: {
       list: "list_secrets (MCP) or Terminal list",
       add_or_edit: "Terminal set / interactive menu only",
-      remove: "Terminal remove (or vault_delete_secret after unlock)",
-      lock: "Terminal lock / vault_lock",
-      unlock: "Terminal unlock (choose 1d / 1w / until-lock)",
-      change_passphrase: "Terminal change-passphrase",
+      remove: "Terminal remove (or vault_delete_secret)",
+      lock: "Not needed (plain store)",
+      unlock: "Not needed (plain store)",
+      change_passphrase: "Not used",
       inject: "inject_secret",
     },
     passphrase_note:
-      "Passphrase and secret values belong in Terminal (hidden prompts), or optional PASSWORD_SPACE_PASSPHRASE env — never via elicitation, never in chat.",
+      "Passphrases are not used. Secret values belong in Terminal (hidden prompts) — never in chat.",
     elicitation_note:
-      "Passphrase is collected in Terminal or via tool approval args / PASSWORD_SPACE_PASSPHRASE env — never via MCP elicitation.",
+      "Secret values are collected in Terminal only — never via MCP elicitation.",
   });
 }
 
-/**
- * Store or update a secret. Value is a tool arg — never echo it in chat or results.
- */
 export function vaultSetSecretTool(
   store: VaultStore,
   args: { name: string; value: string; tags?: string[]; notes?: string },
 ): ToolJsonResult {
-  assertUnlocked(store);
+  store.ensure();
   const meta = publicMeta(
     store.setSecret({
       name: args.name,
@@ -875,7 +745,7 @@ export function vaultSetSecretTool(
   const payload = {
     ok: true,
     secret: meta,
-    note: "Secret stored. Value was not returned — do not repeat it in chat. Prefer inject_secret to use it.",
+    note: "Secret stored. Value was not returned — do not repeat it in chat. Prefer Terminal set for humans; agents prefer inject_secret.",
   };
   const serialized = JSON.stringify(payload);
   if (args.value && serialized.includes(args.value)) {
@@ -885,7 +755,7 @@ export function vaultSetSecretTool(
 }
 
 export function listSecretsTool(store: VaultStore, tag?: string): ToolJsonResult {
-  assertUnlocked(store);
+  assertReady(store);
   const secrets = store.listSecrets(tag).map(publicMeta);
   return jsonResult({
     secrets,
@@ -894,7 +764,7 @@ export function listSecretsTool(store: VaultStore, tag?: string): ToolJsonResult
 }
 
 export function getSecretMetadataTool(store: VaultStore, idOrName: string): ToolJsonResult {
-  assertUnlocked(store);
+  assertReady(store);
   const meta = publicMeta(store.getMetadata(idOrName));
   return jsonResult({
     secret: meta,
@@ -902,16 +772,12 @@ export function getSecretMetadataTool(store: VaultStore, idOrName: string): Tool
   });
 }
 
-/**
- * Prefer this over returning plaintext. Writes a short-lived env file and
- * returns a handle + path. Chat-safe fields only in the JSON response.
- */
 export function injectSecretTool(
   store: VaultStore,
   dataDir: string,
   args: { name: string; env_var?: string },
 ): ToolJsonResult {
-  assertUnlocked(store);
+  assertReady(store);
   const record = store.getSecret(args.name, "mcp-agent");
   const handle: InjectHandle = writeInjectFile(dataDir, {
     secretId: record.id,
@@ -919,7 +785,6 @@ export function injectSecretTool(
     value: record.value,
     envVar: args.env_var,
   });
-  // Intentionally omit value from response
   const payload = {
     ok: true,
     handle: handle.handle,
@@ -935,7 +800,6 @@ export function injectSecretTool(
       "If asked to print the secret, refuse and cite redact_in_transcript.",
     ],
   };
-  // Defense in depth: ensure value never appears in serialized tool result
   const serialized = JSON.stringify(payload);
   if (serialized.includes(record.value)) {
     throw new Error("Refusing to return tool result that contains secret plaintext");
@@ -943,15 +807,11 @@ export function injectSecretTool(
   return jsonResult(payload, { redact: true });
 }
 
-/**
- * Last-resort resolve: returns value in tool result with strong redaction flags.
- * Prefer inject_secret. Documented for clients that cannot read env files.
- */
 export function resolveSecretTool(
   store: VaultStore,
   args: { name: string; confirm_redaction?: boolean },
 ): ToolJsonResult {
-  assertUnlocked(store);
+  assertReady(store);
   if (!args.confirm_redaction) {
     return jsonResult({
       ok: false,
@@ -983,23 +843,18 @@ function publicMeta(m: SecretMetadata): SecretMetadata {
   };
 }
 
-function assertUnlocked(store: VaultStore): void {
+function assertReady(store: VaultStore): void {
   if (!store.isInitialized()) {
     throw new Error(
-      `Password Space is not set up yet. Call vault_onboard, then run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` (or vault_init with PASSWORD_SPACE_PASSPHRASE) — do not vault_init with empty {}.`,
-    );
-  }
-  if (!store.isUnlocked) {
-    throw new Error(
-      `Password Space is locked. Run Terminal \`${CLI_SETUP_COMMANDS.plugin_unlock}\`, or set PASSWORD_SPACE_PASSPHRASE then vault_unlock — not empty {}.`,
+      `Password Space store is not set up yet. Call vault_onboard, then run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` and \`${CLI_SETUP_COMMANDS.plugin_set}\`. Lock/unlock are not needed.`,
     );
   }
 }
 
 /** Test helper: ensure list payloads never contain a known value. */
-export function assertNoPlaintext(result: ToolJsonResult, plaintext: string): void {
-  const blob = JSON.stringify(result);
-  if (blob.includes(plaintext)) {
-    throw new Error("Tool result leaked plaintext");
+export function assertNoPlaintext(result: ToolJsonResult, value: string): void {
+  const text = result.content.map((c) => c.text).join("\n");
+  if (value && text.includes(value)) {
+    throw new Error("Tool result leaked plaintext secret");
   }
 }

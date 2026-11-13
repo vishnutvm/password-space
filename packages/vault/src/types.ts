@@ -11,16 +11,11 @@ export type SecretRecord = SecretMetadata & {
   value: string;
 };
 
+/** Plain-text store metadata (no KDF / encryption). */
 export type VaultMeta = {
-  cryptoVersion: number;
+  storeVersion: number;
   createdAt: string;
-  kdf: {
-    algorithm: "scrypt";
-    N: number;
-    r: number;
-    p: number;
-    salt: string; // base64
-  };
+  storage: "plain-json";
 };
 
 export type AuditEvent = {
@@ -43,7 +38,9 @@ export class VaultError extends Error {
       | "WRONG_PASSPHRASE"
       | "NOT_FOUND"
       | "DUPLICATE_NAME"
-      | "INVALID",
+      | "INVALID"
+      | "LEGACY_ENCRYPTED"
+      | "DEPRECATED",
   ) {
     super(message);
     this.name = "VaultError";
