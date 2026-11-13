@@ -14,13 +14,14 @@ import {
 } from "./session.js";
 import { redactSecrets, looksLikeSecretLeak } from "./redact.js";
 import { writeInjectFile, clearExpiredInjectFiles } from "./inject.js";
+import { secretsStorePath } from "./paths.js";
 
 const dirs: string[] = [];
 
 function tmpVault(): { dir: string; store: VaultStore } {
   const dir = mkdtempSync(join(tmpdir(), "ps-vault-"));
   dirs.push(dir);
-  return { dir, store: new VaultStore(join(dir, "vault.db")) };
+  return { dir, store: new VaultStore(secretsStorePath(dir)) };
 }
 
 afterEach(() => {
@@ -30,17 +31,14 @@ afterEach(() => {
   }
 });
 
-describe("VaultStore lock state", () => {
-  it("init → unlock → set/list/get/delete", async () => {
-    const { store } = tmpVault();
-    await store.init("test-passphrase-ok");
+describe("VaultStore plain text", () => {
+  it("ensure → set/list/get/delete without unlock", async () => {
+    const { store, dir } = tmpVault();
+    expect(store.isInitialized()).toBe(false);
+    store.ensure();
     expect(store.isInitialized()).toBe(true);
-    expect(store.isUnlocked).toBe(false);
-
-    expect(() => store.listSecrets()).toThrow(VaultError);
-
-    await store.unlock("test-passphrase-ok");
     expect(store.isUnlocked).toBe(true);
+    expect(existsSync(secretsStorePath(dir))).toBe(true);
 
     const meta = store.setSecret({
       name: "GITHUB_TOKEN",
@@ -56,6 +54,9 @@ describe("VaultStore lock state", () => {
     expect(listed[0]).not.toHaveProperty("value");
     expect(JSON.stringify(listed)).not.toContain("ghp_supersecret123");
 
+    const onDisk = readFileSync(secretsStorePath(dir), "utf8");
+    expect(onDisk).toContain("ghp_supersecret123");
+
     const md = store.getMetadata("GITHUB_TOKEN");
     expect(md.id).toBe(meta.id);
     expect(JSON.stringify(md)).not.toContain("ghp_supersecret123");
@@ -67,79 +68,32 @@ describe("VaultStore lock state", () => {
     expect(store.listSecrets()).toHaveLength(0);
 
     store.lock();
-    expect(store.isUnlocked).toBe(false);
+    expect(store.isUnlocked).toBe(true);
     store.close();
   });
 
-  it("rejects wrong passphrase", async () => {
+  it("init is idempotent-fail and unlock is a no-op", async () => {
     const { store } = tmpVault();
-    await store.init("test-passphrase-ok");
-    await expect(store.unlock("wrong-passphrase!!")).rejects.toMatchObject({
-      code: "WRONG_PASSPHRASE",
+    await store.init();
+    await expect(store.init()).rejects.toMatchObject({ code: "ALREADY_INITIALIZED" });
+    const key = await store.unlock();
+    expect(key.length).toBe(0);
+    expect(store.isUnlocked).toBe(true);
+    store.close();
+  });
+
+  it("changePassphrase is deprecated", async () => {
+    const { store } = tmpVault();
+    store.ensure();
+    await expect(store.changePassphrase("a", "b")).rejects.toMatchObject({
+      code: "DEPRECATED",
     });
     store.close();
   });
 
-  it("session write/read restores vault key", async () => {
-    const { dir, store } = tmpVault();
-    await store.init("test-passphrase-ok");
-    const key = await store.unlock("test-passphrase-ok");
-    const sessionFile = join(dir, "session");
-    writeSession(sessionFile, key, dir);
-    key.fill(0);
-    store.lock();
-
-    const session = readSession(sessionFile);
-    store.unlockWithKey(session.vaultKey);
-    store.setSecret({ name: "x", value: "y" });
-    expect(store.getSecret("x").value).toBe("y");
-    session.vaultKey.fill(0);
-    clearSession(sessionFile);
-    store.close();
-  });
-
-  it("expired session is rejected and cleared", async () => {
-    const { dir, store } = tmpVault();
-    await store.init("test-passphrase-ok");
-    const key = await store.unlock("test-passphrase-ok");
-    const sessionFile = join(dir, "session");
-    writeSession(sessionFile, key, dir, -1000);
-    key.fill(0);
-    store.lock();
-    expect(() => readSession(sessionFile)).toThrow(VaultError);
-    expect(existsSync(sessionFile)).toBe(false);
-    store.close();
-  });
-
-  it("until-lock session never auto-expires", async () => {
-    const { dir, store } = tmpVault();
-    await store.init("test-passphrase-ok");
-    const key = await store.unlock("test-passphrase-ok");
-    const sessionFile = join(dir, "session");
-    writeSession(sessionFile, key, dir, null);
-    key.fill(0);
-    store.lock();
-    const session = readSession(sessionFile);
-    expect(session.untilLock).toBe(true);
-    expect(session.expiresAt).toBeNull();
-    store.unlockWithKey(session.vaultKey);
-    expect(store.isUnlocked).toBe(true);
-    session.vaultKey.fill(0);
-    clearSession(sessionFile);
-    store.close();
-  });
-
-  it("parseSessionTtlInput accepts presets", () => {
-    expect(parseSessionTtlInput("1d")).toBe(SESSION_TTL_1_DAY_MS);
-    expect(parseSessionTtlInput("1w")).toBe(SESSION_TTL_1_WEEK_MS);
-    expect(parseSessionTtlInput("until-lock")).toBeNull();
-    expect(parseSessionTtlInput(2)).toBe(2 * 60 * 60 * 1000);
-  });
-
-  it("setSecret updates by name and rejects duplicate names", async () => {
+  it("setSecret updates by name and rejects duplicate names", () => {
     const { store } = tmpVault();
-    await store.init("test-passphrase-ok");
-    await store.unlock("test-passphrase-ok");
+    store.ensure();
     store.setSecret({ name: "A", value: "one" });
     store.setSecret({ name: "B", value: "two" });
     store.setSecret({ name: "A", value: "one-updated" });
@@ -148,6 +102,49 @@ describe("VaultStore lock state", () => {
       /already exists/i,
     );
     store.close();
+  });
+
+  it("session helpers still round-trip (legacy leftover files)", () => {
+    const { dir } = tmpVault();
+    const sessionFile = join(dir, "session");
+    const key = Buffer.alloc(32, 7);
+    writeSession(sessionFile, key, dir);
+    key.fill(0);
+    const session = readSession(sessionFile);
+    expect(session.vaultKey.length).toBe(32);
+    session.vaultKey.fill(0);
+    clearSession(sessionFile);
+    expect(existsSync(sessionFile)).toBe(false);
+  });
+
+  it("expired session is rejected and cleared", () => {
+    const { dir } = tmpVault();
+    const sessionFile = join(dir, "session");
+    const key = Buffer.alloc(32, 3);
+    writeSession(sessionFile, key, dir, -1000);
+    key.fill(0);
+    expect(() => readSession(sessionFile)).toThrow(VaultError);
+    expect(existsSync(sessionFile)).toBe(false);
+  });
+
+  it("until-lock session never auto-expires", () => {
+    const { dir } = tmpVault();
+    const sessionFile = join(dir, "session");
+    const key = Buffer.alloc(32, 1);
+    writeSession(sessionFile, key, dir, null);
+    key.fill(0);
+    const session = readSession(sessionFile);
+    expect(session.untilLock).toBe(true);
+    expect(session.expiresAt).toBeNull();
+    session.vaultKey.fill(0);
+    clearSession(sessionFile);
+  });
+
+  it("parseSessionTtlInput accepts presets", () => {
+    expect(parseSessionTtlInput("1d")).toBe(SESSION_TTL_1_DAY_MS);
+    expect(parseSessionTtlInput("1w")).toBe(SESSION_TTL_1_WEEK_MS);
+    expect(parseSessionTtlInput("until-lock")).toBeNull();
+    expect(parseSessionTtlInput(2)).toBe(2 * 60 * 60 * 1000);
   });
 });
 
@@ -189,25 +186,5 @@ describe("inject", () => {
     );
     expect(clearExpiredInjectFiles(dir)).toBe(1);
     expect(existsSync(expired)).toBe(false);
-  });
-});
-
-describe("changePassphrase", () => {
-  it("re-wraps vault key and keeps secrets readable", async () => {
-    const { store } = tmpVault();
-    await store.init("old-passphrase-xx");
-    await store.unlock("old-passphrase-xx");
-    store.setSecret({ name: "KEEP", value: "still-here" });
-    store.lock();
-    await store.changePassphrase("old-passphrase-xx", "new-passphrase-yy");
-    expect(store.isUnlocked).toBe(true);
-    expect(store.getSecret("KEEP").value).toBe("still-here");
-    store.lock();
-    await expect(store.unlock("old-passphrase-xx")).rejects.toMatchObject({
-      code: "WRONG_PASSPHRASE",
-    });
-    await store.unlock("new-passphrase-yy");
-    expect(store.getSecret("KEEP").value).toBe("still-here");
-    store.close();
   });
 });

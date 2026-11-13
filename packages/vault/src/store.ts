@@ -1,317 +1,191 @@
-import { mkdirSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
 import {
-  CRYPTO_VERSION,
-  SCRYPT_N,
-  SCRYPT_P,
-  SCRYPT_R,
-  decrypt,
-  decryptString,
-  deriveKey,
-  encrypt,
-  encryptString,
-  packBlob,
-  randomKey,
-  randomSalt,
-  unpackBlob,
-} from "./crypto.js";
-import { VaultError, type AuditEvent, type SecretMetadata, type SecretRecord, type VaultMeta } from "./types.js";
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { auditLogPath } from "./paths.js";
+import {
+  VaultError,
+  type AuditEvent,
+  type SecretMetadata,
+  type SecretRecord,
+  type VaultMeta,
+} from "./types.js";
 
-type MetaRow = { key: string; value: string };
+const STORE_VERSION = 1;
+
 type SecretRow = {
   id: string;
   name: string;
-  tags_json: string;
+  value: string;
+  tags: string[];
   notes: string | null;
-  ciphertext: Buffer;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
+type StoreFile = {
+  version: number;
+  createdAt: string;
+  secrets: SecretRow[];
+};
+
+/**
+ * Local plain-text named secret store (`secrets.json`, mode 0600).
+ * Values are readable at rest — no passphrase, unlock, or encryption.
+ */
 export class VaultStore {
-  private db: DatabaseSync;
-  private vaultKey: Buffer | null = null;
+  readonly storePath: string;
+  /** @deprecated Prefer storePath — kept for MCP/CLI status fields. */
   readonly dbPath: string;
+  private data: StoreFile | null = null;
 
-  constructor(dbPath: string) {
-    this.dbPath = dbPath;
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec("PRAGMA journal_mode = WAL;");
-    this.db.exec("PRAGMA foreign_keys = ON;");
-    this.ensureSchema();
-  }
-
-  private ensureSchema(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS secrets (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        tags_json TEXT NOT NULL DEFAULT '[]',
-        notes TEXT,
-        ciphertext BLOB NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS audit (
-        id TEXT PRIMARY KEY,
-        at TEXT NOT NULL,
-        action TEXT NOT NULL,
-        secret_id TEXT,
-        secret_name TEXT,
-        actor TEXT NOT NULL,
-        detail TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_secrets_name ON secrets(name);
-      CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at);
-    `);
+  constructor(storePath: string) {
+    this.storePath = storePath;
+    this.dbPath = storePath;
+    mkdirSync(dirname(storePath), { recursive: true });
+    if (existsSync(storePath)) {
+      this.data = this.readFile();
+    }
   }
 
   close(): void {
-    this.lock();
-    this.db.close();
+    // No durable connection — flush already done on write.
+    this.data = this.isInitialized() ? this.readFile() : null;
   }
 
   isInitialized(): boolean {
-    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'initialized'").get() as
-      | MetaRow
-      | undefined;
-    return row?.value === "1";
+    return existsSync(this.storePath);
   }
 
   getMeta(): VaultMeta | null {
-    if (!this.isInitialized()) return null;
-    const get = (key: string) =>
-      (this.db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as MetaRow | undefined)?.value;
-    const salt = get("kdf_salt");
-    const createdAt = get("created_at");
-    if (!salt || !createdAt) return null;
+    if (!this.data) return null;
     return {
-      cryptoVersion: Number(get("crypto_version") ?? CRYPTO_VERSION),
-      createdAt,
-      kdf: {
-        algorithm: "scrypt",
-        N: Number(get("kdf_N") ?? SCRYPT_N),
-        r: Number(get("kdf_r") ?? SCRYPT_R),
-        p: Number(get("kdf_p") ?? SCRYPT_P),
-        salt,
-      },
+      storeVersion: this.data.version,
+      createdAt: this.data.createdAt,
+      storage: "plain-json",
     };
   }
 
-  async init(passphrase: string): Promise<void> {
+  /**
+   * Create an empty store. Passphrase is ignored (soft-compat with old MCP tools).
+   */
+  async init(_passphrase?: string): Promise<void> {
     if (this.isInitialized()) {
-      throw new VaultError("Vault already initialized", "ALREADY_INITIALIZED");
+      throw new VaultError("Store already initialized", "ALREADY_INITIALIZED");
     }
-    if (!passphrase || passphrase.length < 8) {
-      throw new VaultError("Passphrase must be at least 8 characters", "INVALID");
-    }
-
-    const salt = randomSalt();
-    const masterKey = await deriveKey(passphrase, salt);
-    const vaultKey = randomKey();
-    const wrapped = encrypt(vaultKey, masterKey);
     const now = new Date().toISOString();
-
-    const insert = this.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)");
-    this.db.exec("BEGIN");
-    try {
-      insert.run("initialized", "1");
-      insert.run("crypto_version", String(CRYPTO_VERSION));
-      insert.run("created_at", now);
-      insert.run("kdf_algorithm", "scrypt");
-      insert.run("kdf_N", String(SCRYPT_N));
-      insert.run("kdf_r", String(SCRYPT_R));
-      insert.run("kdf_p", String(SCRYPT_P));
-      insert.run("kdf_salt", salt.toString("base64"));
-      insert.run("wrapped_vault_key", packBlob(wrapped).toString("base64"));
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-
-    // Zero master key material from our reference (vaultKey kept only if caller unlocks later)
-    masterKey.fill(0);
-    vaultKey.fill(0);
+    this.data = { version: STORE_VERSION, createdAt: now, secrets: [] };
+    this.persist();
+    this.audit("init", null, null, "human", "plain-json store created");
   }
 
+  /** Ensure the store file exists (setup / first use). */
+  ensure(): void {
+    if (!this.isInitialized()) {
+      const now = new Date().toISOString();
+      this.data = { version: STORE_VERSION, createdAt: now, secrets: [] };
+      this.persist();
+      this.audit("init", null, null, "human", "plain-json store created");
+    } else if (!this.data) {
+      this.data = this.readFile();
+    }
+  }
+
+  /** Always true for the plain store once initialized (no unlock gate). */
   get isUnlocked(): boolean {
-    return this.vaultKey !== null;
-  }
-
-  async unlock(passphrase: string): Promise<Buffer> {
-    if (!this.isInitialized()) {
-      throw new VaultError("Vault not initialized. Run: password-space init", "NOT_INITIALIZED");
-    }
-    const meta = this.getMeta();
-    if (!meta) {
-      throw new VaultError("Vault metadata corrupt", "INVALID");
-    }
-    const salt = Buffer.from(meta.kdf.salt, "base64");
-    const wrappedB64 = (
-      this.db.prepare("SELECT value FROM meta WHERE key = 'wrapped_vault_key'").get() as MetaRow
-    ).value;
-    const wrapped = unpackBlob(Buffer.from(wrappedB64, "base64"));
-
-    const masterKey = await deriveKey(passphrase, salt, {
-      N: meta.kdf.N,
-      r: meta.kdf.r,
-      p: meta.kdf.p,
-    });
-
-    try {
-      const vaultKey = decrypt(wrapped, masterKey);
-      this.vaultKey = vaultKey;
-      this.audit("unlock", null, null, "human", null);
-      return Buffer.from(vaultKey);
-    } catch {
-      throw new VaultError("Wrong passphrase", "WRONG_PASSPHRASE");
-    } finally {
-      masterKey.fill(0);
-    }
-  }
-
-  /** Restore an already-derived vault key (from session file). */
-  unlockWithKey(vaultKey: Buffer): void {
-    if (!this.isInitialized()) {
-      throw new VaultError("Vault not initialized", "NOT_INITIALIZED");
-    }
-    this.vaultKey = Buffer.from(vaultKey);
-  }
-
-  lock(): void {
-    if (this.vaultKey) {
-      this.vaultKey.fill(0);
-      this.vaultKey = null;
-    }
+    return this.isInitialized();
   }
 
   /**
-   * Re-wrap the vault key under a new passphrase-derived master key.
-   * Requires the vault to already be unlocked (or pass currentPassphrase to unlock).
+   * Soft-compat: no-op unlock. Returns an empty buffer (no vault key).
    */
-  async changePassphrase(currentPassphrase: string, nextPassphrase: string): Promise<Buffer> {
+  async unlock(_passphrase?: string): Promise<Buffer> {
     if (!this.isInitialized()) {
-      throw new VaultError("Vault not initialized", "NOT_INITIALIZED");
+      throw new VaultError(
+        "Store not initialized. Run: password-space setup",
+        "NOT_INITIALIZED",
+      );
     }
-    if (!nextPassphrase || nextPassphrase.length < 8) {
-      throw new VaultError("Passphrase must be at least 8 characters", "INVALID");
-    }
-    if (currentPassphrase === nextPassphrase) {
-      throw new VaultError("New passphrase must differ from the current one", "INVALID");
-    }
-
-    // Verify current passphrase and obtain vault key (even if already unlocked).
-    const meta = this.getMeta();
-    if (!meta) throw new VaultError("Vault metadata corrupt", "INVALID");
-    const salt = Buffer.from(meta.kdf.salt, "base64");
-    const wrappedB64 = (
-      this.db.prepare("SELECT value FROM meta WHERE key = 'wrapped_vault_key'").get() as MetaRow
-    ).value;
-    const wrapped = unpackBlob(Buffer.from(wrappedB64, "base64"));
-    const currentMaster = await deriveKey(currentPassphrase, salt, {
-      N: meta.kdf.N,
-      r: meta.kdf.r,
-      p: meta.kdf.p,
-    });
-
-    let vaultKey: Buffer;
-    try {
-      vaultKey = decrypt(wrapped, currentMaster);
-    } catch {
-      throw new VaultError("Wrong passphrase", "WRONG_PASSPHRASE");
-    } finally {
-      currentMaster.fill(0);
-    }
-
-    const newSalt = randomSalt();
-    const newMaster = await deriveKey(nextPassphrase, newSalt);
-    const newWrapped = encrypt(vaultKey, newMaster);
-    newMaster.fill(0);
-
-    const upsert = this.db.prepare(
-      `INSERT INTO meta (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    );
-    this.db.exec("BEGIN");
-    try {
-      upsert.run("kdf_salt", newSalt.toString("base64"));
-      upsert.run("kdf_N", String(SCRYPT_N));
-      upsert.run("kdf_r", String(SCRYPT_R));
-      upsert.run("kdf_p", String(SCRYPT_P));
-      upsert.run("wrapped_vault_key", packBlob(newWrapped).toString("base64"));
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      vaultKey.fill(0);
-      throw err;
-    }
-
-    if (this.vaultKey) {
-      this.vaultKey.fill(0);
-    }
-    this.vaultKey = vaultKey;
-    this.audit("change_passphrase", null, null, "human", null);
-    return Buffer.from(vaultKey);
+    this.data = this.readFile();
+    this.audit("unlock", null, null, "human", "noop — plain store needs no unlock");
+    return Buffer.alloc(0);
   }
 
-  private requireKey(): Buffer {
-    if (!this.vaultKey) {
-      throw new VaultError("Vault is locked. Call vault_unlock (or CLI: password-space unlock)", "LOCKED");
+  /** Soft-compat: no vault key to restore. */
+  unlockWithKey(_vaultKey: Buffer): void {
+    if (!this.isInitialized()) {
+      throw new VaultError("Store not initialized", "NOT_INITIALIZED");
     }
-    return this.vaultKey;
+    this.data = this.readFile();
+  }
+
+  /** Soft-compat: no-op (nothing to lock). */
+  lock(): void {
+    // intentionally empty
+  }
+
+  /**
+   * Soft-compat: passphrase change is not applicable.
+   */
+  async changePassphrase(
+    _currentPassphrase: string,
+    _nextPassphrase: string,
+  ): Promise<Buffer> {
+    throw new VaultError(
+      "Passphrases are not used. The store is local plain text — lock/unlock/change-passphrase are not needed.",
+      "DEPRECATED",
+    );
+  }
+
+  private requireReady(): StoreFile {
+    if (!this.isInitialized() || !this.data) {
+      throw new VaultError(
+        "Store not initialized. Run: password-space setup (or set)",
+        "NOT_INITIALIZED",
+      );
+    }
+    return this.data;
   }
 
   private rowToMeta(row: SecretRow): SecretMetadata {
     return {
       id: row.id,
       name: row.name,
-      tags: JSON.parse(row.tags_json) as string[],
+      tags: row.tags,
       notes: row.notes,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
-  }
-
-  private normalizeRow(row: SecretRow): SecretRow {
-    return {
-      ...row,
-      ciphertext: Buffer.isBuffer(row.ciphertext)
-        ? row.ciphertext
-        : Buffer.from(row.ciphertext as unknown as Uint8Array),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 
   listSecrets(tag?: string): SecretMetadata[] {
-    this.requireKey();
-    const rows = this.db.prepare("SELECT * FROM secrets ORDER BY name COLLATE NOCASE").all() as SecretRow[];
-    const metas = rows.map((r) => this.rowToMeta(this.normalizeRow(r)));
+    const data = this.requireReady();
+    const metas = data.secrets
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+      .map((r) => this.rowToMeta(r));
     if (!tag) return metas;
     const needle = tag.toLowerCase();
     return metas.filter((m) => m.tags.some((t) => t.toLowerCase() === needle));
   }
 
   getMetadata(idOrName: string): SecretMetadata {
-    this.requireKey();
     const row = this.findRow(idOrName);
     if (!row) throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
     return this.rowToMeta(row);
   }
 
   getSecret(idOrName: string, actor = "human"): SecretRecord {
-    const key = this.requireKey();
     const row = this.findRow(idOrName);
     if (!row) throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
-    const value = decryptString(unpackBlob(row.ciphertext), key);
     this.audit("get", row.id, row.name, actor, null);
-    return { ...this.rowToMeta(row), value };
+    return { ...this.rowToMeta(row), value: row.value };
   }
 
   setSecret(input: {
@@ -321,7 +195,8 @@ export class VaultStore {
     notes?: string | null;
     id?: string;
   }): SecretMetadata {
-    const key = this.requireKey();
+    this.ensure();
+    const data = this.requireReady();
     const name = input.name.trim();
     if (!name) throw new VaultError("Secret name is required", "INVALID");
     if (input.value === undefined || input.value === null) {
@@ -331,81 +206,108 @@ export class VaultStore {
     const now = new Date().toISOString();
     const tags = input.tags ?? [];
     const notes = input.notes ?? null;
-    const packed = packBlob(encryptString(input.value, key));
 
-    // Update when id matches, or when name matches and no explicit id was given.
     const existing = input.id ? this.findRow(input.id) : this.findRow(name);
     if (existing) {
-      const conflict = this.db
-        .prepare("SELECT id FROM secrets WHERE name = ? COLLATE NOCASE AND id != ?")
-        .get(name, existing.id) as { id: string } | undefined;
+      const conflict = data.secrets.find(
+        (s) =>
+          s.id !== existing.id && s.name.toLowerCase() === name.toLowerCase(),
+      );
       if (conflict) throw new VaultError(`Secret name already exists: ${name}`, "DUPLICATE_NAME");
 
-      this.db
-        .prepare(
-          `UPDATE secrets SET name = ?, tags_json = ?, notes = ?, ciphertext = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run(name, JSON.stringify(tags), notes, packed, now, existing.id);
+      existing.name = name;
+      existing.value = input.value;
+      existing.tags = tags;
+      existing.notes = notes;
+      existing.updatedAt = now;
+      this.persist();
       this.audit("update", existing.id, name, "human", null);
       return this.getMetadata(existing.id);
     }
 
-    const dup = this.db.prepare("SELECT id FROM secrets WHERE name = ? COLLATE NOCASE").get(name) as
-      | { id: string }
-      | undefined;
+    const dup = data.secrets.find((s) => s.name.toLowerCase() === name.toLowerCase());
     if (dup) throw new VaultError(`Secret name already exists: ${name}`, "DUPLICATE_NAME");
 
     const id = input.id ?? randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO secrets (id, name, tags_json, notes, ciphertext, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(id, name, JSON.stringify(tags), notes, packed, now, now);
+    data.secrets.push({
+      id,
+      name,
+      value: input.value,
+      tags,
+      notes,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.persist();
     this.audit("create", id, name, "human", null);
     return this.getMetadata(id);
   }
 
   deleteSecret(idOrName: string): void {
-    this.requireKey();
+    const data = this.requireReady();
     const row = this.findRow(idOrName);
     if (!row) throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
-    this.db.prepare("DELETE FROM secrets WHERE id = ?").run(row.id);
+    data.secrets = data.secrets.filter((s) => s.id !== row.id);
+    this.persist();
     this.audit("delete", row.id, row.name, "human", null);
   }
 
   listAudit(limit = 50): AuditEvent[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, at, action, secret_id, secret_name, actor, detail FROM audit ORDER BY at DESC LIMIT ?`,
-      )
-      .all(limit) as Array<{
-      id: string;
-      at: string;
-      action: string;
-      secret_id: string | null;
-      secret_name: string | null;
-      actor: string;
-      detail: string | null;
-    }>;
-    return rows.map((r) => ({
-      id: r.id,
-      at: r.at,
-      action: r.action,
-      secretId: r.secret_id,
-      secretName: r.secret_name,
-      actor: r.actor,
-      detail: r.detail,
-    }));
+    const logPath = auditLogPath(dirname(this.storePath));
+    if (!existsSync(logPath)) return [];
+    const lines = readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+    const events: AuditEvent[] = [];
+    for (const line of lines.slice(-limit).reverse()) {
+      try {
+        events.push(JSON.parse(line) as AuditEvent);
+      } catch {
+        // skip corrupt lines
+      }
+    }
+    return events.slice(0, limit);
   }
 
   private findRow(idOrName: string): SecretRow | undefined {
-    const byId = this.db.prepare("SELECT * FROM secrets WHERE id = ?").get(idOrName) as SecretRow | undefined;
-    if (byId) return this.normalizeRow(byId);
-    const byName = this.db.prepare("SELECT * FROM secrets WHERE name = ? COLLATE NOCASE").get(idOrName) as
-      | SecretRow
-      | undefined;
-    return byName ? this.normalizeRow(byName) : undefined;
+    const data = this.requireReady();
+    const byId = data.secrets.find((s) => s.id === idOrName);
+    if (byId) return byId;
+    return data.secrets.find((s) => s.name.toLowerCase() === idOrName.toLowerCase());
+  }
+
+  private readFile(): StoreFile {
+    const raw = readFileSync(this.storePath, "utf8");
+    const parsed = JSON.parse(raw) as StoreFile;
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.secrets)) {
+      throw new VaultError("Store file corrupt", "INVALID");
+    }
+    return {
+      version: Number(parsed.version) || STORE_VERSION,
+      createdAt: parsed.createdAt || new Date().toISOString(),
+      secrets: parsed.secrets.map((s) => ({
+        id: String(s.id),
+        name: String(s.name),
+        value: String(s.value ?? ""),
+        tags: Array.isArray(s.tags) ? s.tags.map(String) : [],
+        notes: s.notes == null ? null : String(s.notes),
+        createdAt: String(s.createdAt ?? ""),
+        updatedAt: String(s.updatedAt ?? ""),
+      })),
+    };
+  }
+
+  private persist(): void {
+    if (!this.data) return;
+    const dir = dirname(this.storePath);
+    mkdirSync(dir, { recursive: true });
+    const tmp = `${this.storePath}.${process.pid}.tmp`;
+    const body = JSON.stringify(this.data, null, 2) + "\n";
+    writeFileSync(tmp, body, { mode: 0o600, encoding: "utf8" });
+    renameSync(tmp, this.storePath);
+    try {
+      chmodSync(this.storePath, 0o600);
+    } catch {
+      // best-effort on platforms without chmod
+    }
   }
 
   private audit(
@@ -415,14 +317,29 @@ export class VaultStore {
     actor: string,
     detail: string | null,
   ): void {
-    this.db
-      .prepare(
-        `INSERT INTO audit (id, at, action, secret_id, secret_name, actor, detail) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(randomUUID(), new Date().toISOString(), action, secretId, secretName, actor, detail);
+    const event: AuditEvent = {
+      id: randomUUID(),
+      at: new Date().toISOString(),
+      action,
+      secretId,
+      secretName,
+      actor,
+      detail,
+    };
+    const logPath = auditLogPath(dirname(this.storePath));
+    try {
+      mkdirSync(dirname(logPath), { recursive: true });
+      writeFileSync(logPath, JSON.stringify(event) + "\n", {
+        flag: "a",
+        mode: 0o600,
+        encoding: "utf8",
+      });
+    } catch {
+      // audit is best-effort
+    }
   }
 
-  static exists(dbPath: string): boolean {
-    return existsSync(dbPath);
+  static exists(storePath: string): boolean {
+    return existsSync(storePath);
   }
 }

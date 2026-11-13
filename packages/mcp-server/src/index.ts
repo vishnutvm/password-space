@@ -3,11 +3,11 @@
  * Password Space MCP server (stdio).
  *
  * Bundled for marketplace installs (`plugins/password-space/dist/index.js`).
- * End users can init / unlock / store secrets via Terminal CLI bundled at
- * `dist/cli.js` (sibling of this file) — no monorepo clone required.
- * Prefer inject_secret over resolve_secret.
+ * End users name secrets via Terminal CLI bundled at `dist/cli.js`
+ * (sibling of this file) — no monorepo clone required.
+ * Prefer inject_secret over resolve_secret. Lock/unlock not required.
  *
- * Never log passphrases or secret values.
+ * Never log secret values.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,7 +25,6 @@ import {
   CLI_SETUP_COMMANDS,
   bundledCliCommand,
   HOST_LIMITATION,
-  MCP_ENV_PATH,
   NodeVersionError,
   PassphraseRequiredError,
   getSecretMetadataTool,
@@ -77,11 +76,12 @@ function loadVaultManagerHtml(): string {
 // defaultDataDir ignores empty / unresolved `${PASSWORD_SPACE_HOME}` placeholders
 const dataDir = defaultDataDir();
 
+/** Soft-compat only — passphrases are unused for the plain store. */
 const passphraseSchema = z
   .string()
   .min(8, "Passphrase must be at least 8 characters.")
   .describe(
-    "Your vault passphrase (8+ characters). Enter here in the MCP approval form — do not paste into chat. Optional if PASSWORD_SPACE_PASSPHRASE is set in MCP Environment.",
+    "Unused for the plain-text store (soft-compat). Prefer Terminal setup/set — never paste secrets into chat.",
   );
 
 const optionalPassphraseShape = {
@@ -98,7 +98,7 @@ server.registerTool(
   {
     title: "Get started with Password Space",
     description:
-      "Guided setup in four steps — local, encrypted, nothing sensitive in the response. Best first call after install.",
+      "Guided setup — local plain-text named secrets, nothing sensitive in the response. Best first call after install. Lock/unlock not needed.",
   },
   async () => {
     try {
@@ -114,7 +114,7 @@ server.registerTool(
   {
     title: "Password Space status",
     description:
-      "Quick health check: vault created, unlocked, and your next step. Never returns passphrases or secret values.",
+      "Quick health check: local store ready and your next step. Never returns secret values. Lock/unlock not required.",
   },
   async () => {
     try {
@@ -128,9 +128,9 @@ server.registerTool(
 server.registerTool(
   "vault_init",
   {
-    title: "Create your vault",
+    title: "Create your store (optional)",
     description:
-      "Step 2 of setup: creates an encrypted vault on this device. Enter your passphrase in the approval form (8+ characters), then call vault_unlock.",
+      "Soft-compat: ensures the local plain-text store exists. Prefer Terminal setup/set. Passphrase is ignored. No unlock needed afterward.",
     inputSchema: optionalPassphraseShape,
   },
   async ({ passphrase }) => {
@@ -145,9 +145,9 @@ server.registerTool(
 server.registerTool(
   "vault_unlock",
   {
-    title: "Unlock your vault",
+    title: "Unlock (not needed)",
     description:
-      "Unlocks for this machine session (prefer Terminal unlock with 1 day / 1 week / until lock). Same passphrase in the approval form only if using MCP path.",
+      "Soft-compat no-op. The plain-text store does not use unlock sessions. Prefer Terminal set + inject_secret.",
     inputSchema: {
       ...optionalPassphraseShape,
       ttl_hours: z
@@ -155,11 +155,11 @@ server.registerTool(
         .min(0.1)
         .max(168)
         .optional()
-        .describe("How long to stay unlocked in hours (default 8, max 168). Ignored when until_lock is true."),
+        .describe("Ignored — unlock is not used."),
       until_lock: z
         .boolean()
         .optional()
-        .describe("If true, session does not auto-expire until vault_lock / CLI lock."),
+        .describe("Ignored — unlock is not used."),
     },
   },
   async ({ passphrase, ttl_hours, until_lock }) => {
@@ -173,7 +173,7 @@ server.registerTool(
 
 server.tool(
   "vault_lock",
-  "Lock Password Space — clears the unlock session on this machine.",
+  "Soft-compat no-op — the plain-text store does not use unlock sessions.",
   {},
   async () => {
     try {
@@ -187,17 +187,15 @@ server.tool(
 server.registerTool(
   "vault_change_passphrase",
   {
-    title: "Change vault passphrase",
+    title: "Change passphrase (not used)",
     description:
-      "Re-wraps the vault key under a new passphrase. Prefer Terminal `change-passphrase` (hidden prompts). Approval-form args only as last resort — never in chat, never via elicitation.",
+      "Soft-compat: passphrases are not used for the plain-text store. Prefer Terminal set/remove.",
     inputSchema: {
-      current_passphrase: passphraseSchema.optional().describe(
-        "Current vault passphrase. Optional if PASSWORD_SPACE_PASSPHRASE is set.",
-      ),
+      current_passphrase: passphraseSchema.optional().describe("Unused."),
       new_passphrase: z
         .string()
         .min(8)
-        .describe("New passphrase (8+ characters). Enter in the approval form only."),
+        .describe("Unused — passphrases are not part of the product path."),
       ttl_hours: z.number().min(0.1).max(168).optional(),
     },
   },
@@ -238,7 +236,7 @@ registerAppTool(
   {
     title: "Vault status (optional)",
     description:
-      "Status-only. Do NOT use for create/unlock/add — human UX is the plugin Terminal CLI (`node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\"` menu|setup|unlock|set|remove|lock). Prefer vault_status / list_secrets / inject_secret / vault_lock. Do not vault_init with empty {}.",
+      "Status-only. Do NOT use for add/remove — human UX is the plugin Terminal CLI (`node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\"` menu|setup|set|remove). Prefer vault_status / list_secrets / inject_secret. Lock/unlock not needed.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },
@@ -293,7 +291,7 @@ server.registerTool(
   {
     title: "Save a password or API token",
     description:
-      "Stores a credential in your vault. Fill name and value in the MCP approval form — never paste the value into chat. Returns only metadata.",
+      "Stores a named credential in the local plain-text store. Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
     inputSchema: {
       name: z
         .string()
@@ -415,32 +413,13 @@ function errorResult(err: unknown) {
     payload.copy_paste_command = bundledCliCommand("setup");
     payload.copy_paste_commands = CLI_SETUP_COMMANDS;
     payload.howToFix =
-      "Stop retrying vault_init/unlock with empty {}. Run the plugin-bundled Terminal CLI (copy_paste_command) or set PASSWORD_SPACE_PASSPHRASE in MCP Environment. No repo clone needed.";
-    payload.what_happened =
-      "Cursor approved the tool with empty {} — no passphrase was provided (common host limitation).";
+      "Passphrases are not used. Run the plugin-bundled Terminal CLI (setup then set). No unlock needed.";
     payload.what_to_do = [
       `Recommended: ${bundledCliCommand("setup")}`,
-      `Or: ${MCP_ENV_PATH}`,
-      "Vault Manager is optional status UI only — prefer Terminal for create/unlock/add.",
-      "Do not ask the user to reply \"ready\" then call vault_init again without a passphrase channel.",
+      `Then: ${bundledCliCommand("set")}`,
+      "Vault Manager is optional status UI only — prefer Terminal for add/remove.",
     ];
-    payload.never = [
-      "Approve vault_init / vault_unlock with empty {}",
-      'Tell the user to reply "ready" then call vault_init without passphrase',
-    ];
-  } else if (/passphrase/i.test(message) && /8 character/i.test(message)) {
-    payload.code = "passphrase_too_short";
-    payload.howToFix = "Choose a passphrase with at least 8 characters, then try again.";
-    payload.what_to_do = ["Use 8 or more characters for your vault passphrase."];
-  } else if (/Wrong passphrase/i.test(message)) {
-    payload.code = "wrong_passphrase";
-    payload.howToFix =
-      "That passphrase did not unlock the vault. Retry carefully via Terminal unlock or MCP Environment — there is no recovery without the correct passphrase.";
-  } else if (/locked/i.test(message)) {
-    payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_unlock}\` or set PASSWORD_SPACE_PASSPHRASE then vault_unlock.`;
-    payload.host_limitation = HOST_LIMITATION;
-    payload.recommended_path = "cli_unlock";
-    payload.copy_paste_command = bundledCliCommand("unlock");
+    payload.never = ["Paste secret values into chat", "Edit mcp.json"];
   } else if (/not set up|not initialized/i.test(message)) {
     payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_setup}\` or /setup-password-space and follow primary_action (Terminal-first; no clone).`;
     payload.host_limitation = HOST_LIMITATION;

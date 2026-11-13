@@ -1,10 +1,10 @@
 # Password Space
 
-**A local encrypted credential vault for developers and AI agents.**
+**A local plain-text named secret store for developers and AI agents.**
 
-Store secrets once. Unlock them explicitly. Let agents access credentials through MCP without routinely exposing secret values in chat transcripts.
+Store secrets once by name in Terminal. Let agents access credentials through MCP (`inject_secret`) without pasting values into chat transcripts.
 
-> Encryption at rest and MCP inject handles reduce how often secrets appear in chat — they do **not** make secrets invisible to a compromised machine, a stolen unlock session, or every possible log/tool path. See [Security model](#security-model) and [SECURITY.md](./SECURITY.md).
+> Values are stored as **local plain files** (mode `0600`) under `~/.password-space`. That keeps secrets out of chat — it does **not** hide them from anyone with access to your user account or disk. See [Security model](#security-model) and [SECURITY.md](./SECURITY.md).
 
 ## Why Password Space?
 
@@ -12,49 +12,44 @@ Store secrets once. Unlock them explicitly. Let agents access credentials throug
 | --- | --- |
 | Paste secrets into chat | Persist in transcripts, screenshots, logs |
 | Commit `.env` files | Leak via git and shared workspaces |
-| Plaintext MCP configs | Readable by anything with config access |
+| Re-type tokens into every agent turn | Friction + accidental leaks |
 
-Password Space keeps **ciphertext on disk**, an **explicit unlock** gate, and an **agent side channel** (MCP + short-lived inject files + Skill + optional redaction hook).
+Password Space keeps **named secrets on disk**, a **Terminal-only** human path for add/remove, and an **agent side channel** (MCP inject by name + Skill + optional redaction hook).
 
 ## Features
 
 | Feature | What it does |
 | --- | --- |
-| Encrypted local storage | Secrets in SQLite (`vault.db`), AES-256-GCM under a passphrase-wrapped vault key |
-| Explicit unlock | `vault_unlock` (MCP) or CLI `unlock` before tools can use the vault; `vault_lock` / `lock` clears the session |
+| Plain local storage | Secrets in `secrets.json` (mode `0600`) under `~/.password-space` |
+| No unlock gate | Lock / unlock / passphrase are **not** required for the happy path |
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
-| Day-1 Terminal + MCP | Terminal `setup` / `set` for passphrase and secrets; MCP `vault_status`, `list_secrets`, `inject_secret`, `vault_lock` after unlock |
+| Day-1 Terminal + MCP | Terminal `setup` / `set` for secrets; MCP `vault_status`, `list_secrets`, `inject_secret` |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
-| Session TTL | Interactive unlock chooses **1 day**, **1 week**, or **until lock**; scripts default **8 hours**; expired sessions are rejected and cleared |
 | Redaction hook | Optional `beforeSubmitPrompt` hook strips **known** inject values from outbound prompts |
 | Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
-When the vault is **locked**, mutating/read tools fail until unlock again. Restarting the MCP process does not unlock the vault — it only re-reads an existing valid session file.
-
 ## Security model
 
-**Designed to protect:** vault database on disk while locked (ciphertext + wrapped key); chat/transcript plane when agents use `inject_secret` / tool-arg secrets and follow the Skill (handles like `ps://NAME` instead of values).
+**Designed to protect:** chat/transcript plane when agents use `inject_secret` / tool-arg secrets and follow the Skill (handles like `ps://NAME` instead of values).
 
-**Does not protect against:** an attacker on the same unlocked user account; theft of a live session file; plaintext while present in process memory, inject `*.env` files, or CLI `get` / `resolve_secret` results; hooks that are disabled, misconfigured, or incomplete.
+**Does not protect against:** anyone who can read your user files; plaintext on disk in `secrets.json`; plaintext in process memory, inject `*.env` files, or CLI `get` / `resolve_secret` results; hooks that are disabled, misconfigured, or incomplete.
 
 | Area | MVP behavior |
 | --- | --- |
-| KDF / encryption | scrypt (N=2¹⁵, r=8, p=1) + AES-256-GCM via Node `crypto` — see [SECURITY.md](./SECURITY.md) |
-| Unlock session | `$PASSWORD_SPACE_HOME/session`, mode `0600`; CLI chooses 1d / 1w / until-lock (scripts default 8h); lock deletes it |
-| Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, mode `0600`, default TTL **5 minutes** (consume then delete) |
-| Passphrase loss | **No recovery** — ciphertext is unrecoverable without the unlock passphrase |
+| At rest | Plain JSON at `$PASSWORD_SPACE_HOME/secrets.json`, mode `0600` |
+| Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, mode `0600`, default TTL **5 minutes** |
 | Redaction | Only **known** values from inject files / explicit secret lists — not a universal DLP |
 
-Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.md)**. Architecture / key hierarchy: **[docs/architecture.md](./docs/architecture.md)**.
+Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/architecture.md](./docs/architecture.md)**.
 
 ## Requirements
 
 | Requirement | Notes |
 | --- | --- |
-| Node.js | **≥ 20** (uses built-in `node:sqlite`) — required to run the bundled MCP |
+| Node.js | **≥ 20** — required to run the bundled MCP |
 | Cursor plugin | Cursor with marketplace / MCP support |
-| Package manager | **pnpm** 9.x — **optional**; only for developing this repo (external users use the plugin-bundled CLI) |
-| OS | Developed and verified on **macOS**; should run anywhere Node 20 + `node:sqlite` works — treat Linux/Windows as **best-effort** until listed here as tested |
+| Package manager | **pnpm** 9.x — **optional**; only for developing this repo |
+| OS | Developed and verified on **macOS**; Linux/Windows best-effort |
 
 ## Quickstart (Cursor plugin + Terminal)
 
@@ -64,45 +59,42 @@ Full threat model, trust boundaries, and reporting: **[SECURITY.md](./SECURITY.m
 2. **+ Add Marketplace** → **Import from GitHub**.
 3. Paste: `https://github.com/vishnutvm/password-space`
 4. Install the **password-space** plugin and reload Cursor.
-5. Vault home defaults to **`~/.password-space`**. Optional override: a **real** absolute `PASSWORD_SPACE_HOME` in the process environment or MCP `env`. Never leave an unresolved `${PASSWORD_SPACE_HOME}` (or other `${…}`) as the path — the server treats those as unset and falls back to the default. There is **no** Plugins → Configure UI for this.
+5. Store home defaults to **`~/.password-space`**. Optional override: a **real** absolute `PASSWORD_SPACE_HOME`. There is **no** Plugins → Configure UI for this.
 6. Run **`/setup-password-space`** in chat, or ask the agent to run **`vault_onboard`**.
-7. **Default:** follow `primary_action` — open **Terminal** and run `copy_paste_command`. **No repo clone.** Typical commands after marketplace install + Reload:
+7. Follow `primary_action` — open **Terminal** and run `copy_paste_command`:
    ```bash
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup   # passphrase + unlock duration (1d / 1w / until lock)
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup   # ensure store
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set     # name + hidden value
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"         # interactive menu (all human actions)
+   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"         # interactive menu
    ```
-   Passphrase and secret values are typed at **hidden** prompts. Approving empty `{}` fails with `passphrase_missing`. There is **no App UI** for create/add.
-8. **Optional:** **Settings → MCP → password-space → Environment** → `PASSWORD_SPACE_PASSPHRASE` (never paste it into chat), then `vault_init` / `vault_unlock` with `{}`.
+   Secret values are typed at **hidden** prompts. There is **no App UI** for add.
 
 ```text
 vault_onboard → Terminal: …/dist/cli.js setup → …/dist/cli.js set → vault_status / list_secrets → inject_secret
-# optional: MCP Environment PASSWORD_SPACE_PASSPHRASE → vault_init {} → vault_unlock {}
 ```
 
-Pass **passphrase** and **secret name + value** in **Terminal** — **never** in chat. MCP tools handle status / list / inject / lock after unlock. Vault Manager is optional status UI only.
+Pass **secret name + value** in **Terminal** — **never** in chat. MCP tools handle status / list / inject by name. Vault Manager is optional status UI only.
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
 Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/` (ships `dist/index.js` + `dist/cli.js`).
 
-## CLI (create / unlock / add — primary path)
+## CLI (setup / add / remove — primary path)
 
 ### External users (plugin-bundled — preferred)
 
 After installing the marketplace plugin and reloading Cursor:
 
 ```bash
-node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup    # create + unlock (hidden passphrase)
-node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" unlock   # writes session file
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup    # ensure ~/.password-space/secrets.json
 node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set      # prompts for name, then hidden value
 node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set GITHUB_TOKEN --tags api,github
 node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" list     # names / tags only
 node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" status
-node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" lock
+node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" remove
 ```
 
-If `vault_onboard` returns an absolute path to `cli.js`, prefer that paste command (Terminal does not always expand `CURSOR_PLUGIN_ROOT`).
+If `vault_onboard` returns an absolute path to `cli.js`, prefer that paste command.
 
 ### Contributors (optional clone)
 
@@ -121,8 +113,6 @@ pnpm password-space setup
 | stdin (one value) | Non-TTY (pipes) with name on argv |
 | `--value <text>` | Explicit flag (avoid in shell history for real secrets) |
 
-Prefer piping from a protected source rather than putting a real token on the command line:
-
 ```bash
 printf '%s' "$GITHUB_TOKEN" | node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set GITHUB_TOKEN --tags api,github
 ```
@@ -135,21 +125,17 @@ printf '%s' "$GITHUB_TOKEN" | node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set GITHU
 export PASSWORD_SPACE_HOME=/tmp/ps-demo
 rm -rf "$PASSWORD_SPACE_HOME"
 
-# WARNING: inline PASSWORD_SPACE_PASSPHRASE is for demos only — it can end up in shell history.
-# Do not use this pattern with a real vault passphrase.
-PASSWORD_SPACE_PASSPHRASE='demo-pass-ok' pnpm password-space init
-PASSWORD_SPACE_PASSPHRASE='demo-pass-ok' pnpm password-space unlock
+pnpm password-space setup
 printf 'ghp_demo_secret_value' | pnpm password-space set DEMO_TOKEN --tags demo
 pnpm password-space list
 pnpm password-space status
-pnpm password-space lock
 ```
 
-Or run `pnpm demo` (throwaway vault under `/tmp/password-space-demo`).
+Or run `pnpm demo` (throwaway store under `/tmp/password-space-demo`).
 
 ## Manual MCP configuration
 
-Without the marketplace, point Cursor (or another MCP client) at the **bundled** server (Node only — no monorepo install):
+Without the marketplace, point Cursor (or another MCP client) at the **bundled** server:
 
 ```json
 {
@@ -162,7 +148,7 @@ Without the marketplace, point Cursor (or another MCP client) at the **bundled**
 }
 ```
 
-`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`. If you override in MCP `env`, use a concrete absolute path only (never an unresolved `${PASSWORD_SPACE_HOME}` placeholder).
+`PASSWORD_SPACE_HOME` is optional — omit `env` for the default `~/.password-space`.
 
 Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugins/password-space/skills/password-space/`. Hooks: `plugins/password-space/hooks/hooks.json`.
 
@@ -170,40 +156,34 @@ Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugi
 
 | Tool | Returns secret value? | Use |
 | --- | --- | --- |
-| `vault_status` | No | Initialized? Unlocked? Next step hint |
-| `vault_init` | No | Create vault (passphrase via arg or `PASSWORD_SPACE_PASSPHRASE`) |
-| `vault_unlock` | No | Write unlock session |
-| `vault_lock` | No | Clear unlock session |
-| `vault_set_secret` | **No** (metadata only) | Store/update name + value + tags |
+| `vault_onboard` | No | Guided next step (`primary_action`) |
+| `vault_status` | No | Store ready? Next step hint |
+| `vault_init` | No | Soft-compat: ensure store (prefer Terminal setup) |
+| `vault_unlock` / `vault_lock` | No | Soft-compat no-ops (not required) |
+| `vault_set_secret` | **No** (metadata only) | Prefer Terminal `set` for humans |
 | `list_secrets` | No | Discover names / ids / tags |
 | `get_secret_metadata` | No | One secret’s metadata |
-| `inject_secret` | **No** (writes env file) | **Preferred** agent access |
+| `inject_secret` | **No** (writes env file) | **Preferred** agent access by name |
 | `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |
 
 ## Secret-injection lifecycle
 
-This is the intended agent path (conversation plane stays on refs; runtime plane reads a file).
-
 ```text
-1. Human/agent: vault_status → vault_init (once) → vault_unlock
-2. Agent: vault_set_secret (values as tool args — not chat)
-3. Agent: list_secrets / get_secret_metadata   → names only
-4. Agent: inject_secret({ name })
-5. MCP: decrypt in-process → write inject/<token>.env (0600)
-6. Tool result: handle + env_file path + env_var + expires_at  (no value)
-7. Runtime: source/read env file outside chat → use credential
-8. Runtime: delete env file when done
-9. Human/agent: vault_lock when finished
+1. Human: Terminal setup → set (name + hidden value)
+2. Agent: list_secrets / get_secret_metadata   → names only
+3. Agent: inject_secret({ name })
+4. MCP: read store → write inject/<token>.env (0600)
+5. Tool result: handle + env_file path + env_var + expires_at  (no value)
+6. Runtime: source/read env file outside chat → use credential
+7. Runtime: delete env file when done
 ```
 
 | Question | Answer |
 | --- | --- |
-| What does `inject_secret` return? | JSON with `handle` (`ps://NAME`), `env_file` (absolute path), `env_var`, `expires_at`, `redact_in_transcript: true` — **not** the secret value |
+| What does `inject_secret` return? | JSON with `handle` (`ps://NAME`), `env_file`, `env_var`, `expires_at`, `redact_in_transcript: true` — **not** the secret value |
 | Where is the file? | `$PASSWORD_SPACE_HOME/inject/<random>.env` |
-| Permissions? | Written with mode `0600` (best-effort `chmod`) |
+| Permissions? | Written with mode `0600` |
 | How to use without printing? | Read/source the file in a shell or tool runtime; do **not** `cat` it into chat |
-| When deleted? | Caller should delete after use; TTL metadata defaults to **5 minutes** (file is not auto-swept by a daemon in MVP) |
-| Vault locked / missing secret? | Tool returns an error payload (`Vault is locked…` / `Secret not found…`); no env file is written |
 
 Avoid CLI `get` and MCP `resolve_secret` in agent workflows — both can put plaintext into the tool/CLI result stream.
 
@@ -211,35 +191,35 @@ Avoid CLI `get` and MCP `resolve_secret` in agent workflows — both can put pla
 
 ```mermaid
 flowchart TB
-  Human[Human + agent prompts] -->|vault_init / unlock / set| MCP[Bundled MCP]
-  MCP --> Vault[(Encrypted SQLite vault.db)]
-  MCP -->|session 0600| Session[Unlock session]
-  Agent[Agent + Skill] -->|list / metadata / inject| MCP
-  MCP -->|ciphertext decrypt| Vault
+  Human[Human + Terminal CLI] -->|setup / set / remove| Store[(secrets.json plain)]
+  Agent[Agent + Skill] -->|list / metadata / inject| MCP[Bundled MCP]
+  MCP --> Store
   MCP -->|env file handle| Inject[inject/*.env]
   Agent -->|consume outside chat| Inject
   Hook[redact.mjs hook] -->|strip known values| Chat[Chat transcript]
   Agent -.->|prefer handles only| Chat
-  CLI[Optional CLI] -.->|same vault| Vault
 ```
 
-**Key hierarchy:** passphrase → scrypt(salt) → unwrap vault key → AES-256-GCM per secret.
-
 Detail: [docs/architecture.md](./docs/architecture.md).
+
+## Migrating from the encrypted vault
+
+Older releases used an encrypted SQLite `vault.db` plus unlock sessions. That file is **never deleted or auto-migrated**.
+
+1. Keep your old `~/.password-space/vault.db` as a backup if you still need it.
+2. Run Terminal `setup` to create `secrets.json`.
+3. Re-add each secret with Terminal `set` (name + hidden value).
+4. Ask the agent to use secrets by name via `inject_secret`.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
-| `node:sqlite` / MCP fails to start | Node &lt; 20 | Upgrade to Node 20+ (`node -v`) |
-| `Vault not initialized` | No `vault_init` yet | Ask the agent to call `vault_init`, or CLI `password-space init` |
-| `Vault is locked` / `No unlock session` | Locked or expired session | Call `vault_unlock`, or CLI `password-space unlock` |
-| `Unlock session expired` | TTL elapsed | Unlock again in Terminal; choose 1 day / 1 week / until lock, or `--ttl 1d\|1w\|until-lock` |
-| `Wrong passphrase` | Typo or wrong vault | Confirm `PASSWORD_SPACE_HOME` matches the vault you meant |
-| Plugin installed but MCP errors “locked” | Session missing/expired | Call `vault_unlock` (same `PASSWORD_SPACE_HOME`) |
-| Secret not found | Wrong name / empty vault | `list_secrets` after unlock |
-| Unexpected data dir | Env override or unresolved `${…}` | Check `PASSWORD_SPACE_HOME` is a real path or unset; `vault_status` shows `data_dir` (placeholders fall back to `~/.password-space`) |
-| MCP won’t start | Bad path to `dist/index.js` | Rebuild with `pnpm build`, or reinstall the plugin |
+| MCP fails to start | Node &lt; 20 | Upgrade to Node 20+ (`node -v`) |
+| Store not initialized | No setup yet | Terminal `setup` or follow `vault_onboard` |
+| Secret not found | Wrong name / empty store | `list_secrets` after Terminal `set` |
+| Unexpected data dir | Env override or unresolved `${…}` | Check `PASSWORD_SPACE_HOME`; `vault_status` shows `data_dir` |
+| Legacy `vault.db` present | Pre-plain-text install | Re-add secrets with `set`; old DB left untouched |
 
 ## Development
 
@@ -249,9 +229,9 @@ pnpm install && pnpm build && pnpm test
 
 | Path | Role |
 | --- | --- |
-| `packages/vault` | Crypto, store, session, inject, redact |
-| `packages/cli` | Optional human CLI |
+| `packages/vault` | Plain store, inject, redact |
+| `packages/cli` | Human Terminal CLI |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
-| `plugins/password-space` | Cursor plugin (bundled MCP + skill + hooks + logo) |
+| `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
