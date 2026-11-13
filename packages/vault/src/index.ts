@@ -8,98 +8,80 @@ export * from "./inject.js";
 export * from "./unlock-guard.js";
 
 import { VaultStore } from "./store.js";
+import { clearSession, type SessionTtlMs } from "./session.js";
 import {
-  clearSession,
-  readSession,
-  writeSession,
-  hasValidSession,
-  type SessionTtlMs,
-} from "./session.js";
-import { defaultDataDir, sessionPath, vaultDbPath } from "./paths.js";
+  defaultDataDir,
+  secretsStorePath,
+  sessionPath,
+  vaultDbPath,
+} from "./paths.js";
 import { clearExpiredInjectFiles } from "./inject.js";
-import {
-  beforeUnlockAttempt,
-  recordUnlockFailure,
-  recordUnlockSuccess,
-} from "./unlock-guard.js";
 import { VaultError } from "./types.js";
 
 export type OpenVaultOptions = {
   dataDir?: string;
-  /** If true, load unlock session from disk */
+  /** Ignored for plain store (kept for call-site compatibility). */
   useSession?: boolean;
 };
 
-/** Open vault DB; optionally restore unlock from session file. */
+/** Open the plain-text secret store under the data directory. */
 export function openVault(opts: OpenVaultOptions = {}): VaultStore {
   const dataDir = opts.dataDir ?? defaultDataDir();
-  const store = new VaultStore(vaultDbPath(dataDir));
-  if (opts.useSession !== false && hasValidSession(sessionPath(dataDir))) {
-    try {
-      const session = readSession(sessionPath(dataDir));
-      store.unlockWithKey(session.vaultKey);
-      session.vaultKey.fill(0);
-    } catch {
-      // leave locked
-    }
-  }
-  return store;
+  return new VaultStore(secretsStorePath(dataDir));
 }
 
+/**
+ * Soft-compat: plain store needs no unlock session.
+ * Ensures the store exists and clears any leftover legacy session file.
+ */
 export async function unlockVaultToSession(
-  passphrase: string,
+  _passphrase: string,
   opts: { dataDir?: string; ttlMs?: SessionTtlMs } = {},
 ): Promise<{ expiresAt: string | null; untilLock: boolean }> {
   const dataDir = opts.dataDir ?? defaultDataDir();
-  await beforeUnlockAttempt(dataDir);
   clearExpiredInjectFiles(dataDir);
-  const store = new VaultStore(vaultDbPath(dataDir));
+  const store = new VaultStore(secretsStorePath(dataDir));
   try {
-    const vaultKey = await store.unlock(passphrase);
-    writeSession(sessionPath(dataDir), vaultKey, dataDir, opts.ttlMs);
-    const session = readSession(sessionPath(dataDir));
-    vaultKey.fill(0);
-    session.vaultKey.fill(0);
-    recordUnlockSuccess(dataDir);
-    return { expiresAt: session.expiresAt, untilLock: session.untilLock };
-  } catch (err) {
-    if (err instanceof VaultError && err.code === "WRONG_PASSPHRASE") {
-      recordUnlockFailure(dataDir);
+    if (!store.isInitialized()) {
+      throw new VaultError(
+        "Store not initialized. Run: password-space setup",
+        "NOT_INITIALIZED",
+      );
     }
-    throw err;
+    await store.unlock();
+    clearSession(sessionPath(dataDir));
+    return { expiresAt: null, untilLock: true };
   } finally {
     store.close();
   }
 }
 
+/** Soft-compat: passphrase change is not used for plain text. */
 export async function changeVaultPassphrase(
-  currentPassphrase: string,
-  nextPassphrase: string,
+  _currentPassphrase: string,
+  _nextPassphrase: string,
   opts: { dataDir?: string; ttlMs?: SessionTtlMs } = {},
 ): Promise<{ expiresAt: string | null; untilLock: boolean }> {
   const dataDir = opts.dataDir ?? defaultDataDir();
-  await beforeUnlockAttempt(dataDir);
-  const store = new VaultStore(vaultDbPath(dataDir));
+  const store = new VaultStore(secretsStorePath(dataDir));
   try {
-    const vaultKey = await store.changePassphrase(currentPassphrase, nextPassphrase);
-    writeSession(sessionPath(dataDir), vaultKey, dataDir, opts.ttlMs);
-    const session = readSession(sessionPath(dataDir));
-    vaultKey.fill(0);
-    session.vaultKey.fill(0);
-    recordUnlockSuccess(dataDir);
-    return { expiresAt: session.expiresAt, untilLock: session.untilLock };
-  } catch (err) {
-    if (err instanceof VaultError && err.code === "WRONG_PASSPHRASE") {
-      recordUnlockFailure(dataDir);
-    }
-    throw err;
+    await store.changePassphrase("", "");
+    return { expiresAt: null, untilLock: true };
   } finally {
     store.close();
   }
 }
 
+/** Soft-compat: clears leftover session / inject files; store stays readable. */
 export function lockVaultSession(opts: { dataDir?: string } = {}): void {
   const dataDir = opts.dataDir ?? defaultDataDir();
   clearSession(sessionPath(dataDir));
   clearExpiredInjectFiles(dataDir);
 }
+
+/** @deprecated Use secretsStorePath — alias for status fields. */
+export function storeFilePath(dataDir: string): string {
+  return secretsStorePath(dataDir);
+}
+
+export { vaultDbPath };

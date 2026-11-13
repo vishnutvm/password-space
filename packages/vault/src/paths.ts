@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -30,14 +31,34 @@ export function defaultDataDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), ".password-space");
 }
 
+/** Plain-text named secret store (mode 0600). */
+export function secretsStorePath(dataDir: string): string {
+  return join(dataDir, "secrets.json");
+}
+
+/** Optional append-only audit log (no secret values). */
+export function auditLogPath(dataDir: string): string {
+  return join(dataDir, "audit.jsonl");
+}
+
+/**
+ * Legacy encrypted SQLite path from pre-plain-text releases.
+ * Left untouched — never auto-migrated or deleted.
+ */
 export function vaultDbPath(dataDir: string): string {
   return join(dataDir, "vault.db");
 }
 
+/** @deprecated Unlock sessions are unused for the plain-text store. */
 export function sessionPath(dataDir: string): string {
   return join(dataDir, "session");
 }
 
 export function injectDir(dataDir: string): string {
   return join(dataDir, "inject");
+}
+
+/** True when a legacy encrypted vault.db exists (migration is manual re-add). */
+export function hasLegacyEncryptedVault(dataDir: string): boolean {
+  return existsSync(vaultDbPath(dataDir));
 }
