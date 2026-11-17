@@ -45,6 +45,8 @@ Default store folder: `~/.password-space`. Optional override: a real absolute `P
 
 `vault_init` / `vault_unlock` / `vault_lock` may still appear for compatibility — they are **not** required.
 
+**Claude Code:** `/plugin marketplace add vishnutvm/password-space`, then `/plugin install password-space@password-space-marketplace`. Hooks and differences from Cursor: [claude-code.md](../../docs/claude-code.md).
+
 More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [plain-text store note](../../docs/onboarding.md). CLI details: [root README](../../README.md).
 
 MIT
