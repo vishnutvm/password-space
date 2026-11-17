@@ -49,11 +49,6 @@ export function vaultDbPath(dataDir: string): string {
   return join(dataDir, "vault.db");
 }
 
-/** @deprecated Unlock sessions are unused for the plain-text store. */
-export function sessionPath(dataDir: string): string {
-  return join(dataDir, "session");
-}
-
 export function injectDir(dataDir: string): string {
   return join(dataDir, "inject");
 }

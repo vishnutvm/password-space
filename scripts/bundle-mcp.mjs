@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Bundle the MCP server (+ vault + deps) into plugins/password-space/dist/index.js,
- * the Terminal CLI into plugins/password-space/dist/cli.js, and the Vault Manager
+ * the Terminal CLI into plugins/password-space/dist/cli.js, the prompt-hook guard into
+ * plugins/password-space/dist/guard.js, and the Vault Manager
  * MCP App HTML into plugins/password-space/dist/vault-manager.html so marketplace
  * installs can run with Node only (no pnpm / no repo clone for MCP or Terminal setup).
  */
@@ -48,6 +49,17 @@ await esbuild.build({
 });
 
 console.log(`bundled → ${cliOut}`);
+
+// Prompt guard used by the Cursor / Claude Code prompt hooks (scripts/prompt-guard.mjs).
+const guardOut = join(outDir, "guard.js");
+await esbuild.build({
+  ...shared,
+  sourcemap: false,
+  entryPoints: [join(root, "packages/vault/src/guard-entry.ts")],
+  outfile: guardOut,
+});
+
+console.log(`bundled → ${guardOut}`);
 
 // --- Vault Manager App (single-file HTML for MCP Apps progressive enhancement) ---
 const uiEntry = join(root, "packages/mcp-server/src/app/vault-manager-ui.ts");

@@ -11,11 +11,13 @@ export type SecretRecord = SecretMetadata & {
   value: string;
 };
 
-/** Plain-text store metadata (no KDF / encryption). */
+/** Where secret values live. Names, tags and notes are always in secrets.json. */
+export type StorageBackend = "keychain" | "file";
+
 export type VaultMeta = {
   storeVersion: number;
   createdAt: string;
-  storage: "plain-json";
+  storage: StorageBackend;
 };
 
 export type AuditEvent = {
@@ -34,13 +36,10 @@ export class VaultError extends Error {
     readonly code:
       | "NOT_INITIALIZED"
       | "ALREADY_INITIALIZED"
-      | "LOCKED"
-      | "WRONG_PASSPHRASE"
       | "NOT_FOUND"
       | "DUPLICATE_NAME"
       | "INVALID"
-      | "LEGACY_ENCRYPTED"
-      | "DEPRECATED",
+      | "KEYCHAIN",
   ) {
     super(message);
     this.name = "VaultError";
