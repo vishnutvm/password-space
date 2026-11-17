@@ -76,7 +76,7 @@ Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/archi
 vault_onboard → Terminal: …/dist/cli.js setup → …/dist/cli.js set → vault_status / list_secrets → inject_secret
 ```
 
-Pass **secret name + value** in **Terminal** — **never** in chat. MCP tools handle status / list / inject by name. Vault Manager is optional status UI only.
+Pass **secret name + value** in **Terminal**, or hand a key to your agent once and it saves it with `store_secret` (see below). MCP tools handle status / list / use by name. Vault Manager is optional status UI only.
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
@@ -164,14 +164,29 @@ Without the marketplace, point Cursor (or another MCP client) at the **bundled**
 
 Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugins/password-space/skills/password-space/`. Hooks: `plugins/password-space/hooks/hooks.json`.
 
+### Hand a key to your agent once
+
+If you would rather not use Terminal, give the key to your agent one time, for example
+*"here is my GitHub token, save it as GITHUB_TOKEN: ghp_…"*. The agent calls `store_secret`,
+the value goes to your OS keychain, and from then on every session finds it with `list_secrets`
+and uses it by name through `run -s GITHUB_TOKEN -- <command>`. You don't paste it again.
+
+- The value is never returned by any tool result except the last-resort `resolve_secret`, and errors are scrubbed of it.
+- An existing name is never replaced unless the agent passes `overwrite: true` (for a rotated key).
+- `remove_secret` deletes a secret by name when you ask the agent to forget it.
+- Every add, update and remove is written to `~/.password-space/audit.jsonl` with the name and actor (`mcp-agent`), never the value.
+- The copy you pasted stays in that chat's history. Use Terminal `set` for keys that should never touch a chat.
+- macOS limits keychain values to about 1,900 bytes and Windows to 2,560; longer values are refused with that message.
+
 ### MCP tools
 
 | Tool | Returns secret value? | Use |
 | --- | --- | --- |
 | `vault_onboard` | No | Guided next step (`primary_action`) |
 | `vault_status` | No | Store ready? Next step hint |
-| `vault_set_secret` | **No** (metadata only) | Prefer Terminal `set` for humans |
-| `list_secrets` | No | Discover names / ids / tags |
+| `store_secret` | **No** (metadata + how to use it by name) | Agent saves a key the user handed over. `overwrite: true` to replace. Alias: `vault_set_secret` |
+| `remove_secret` | No | Agent deletes a secret by name. Alias: `vault_delete_secret` |
+| `list_secrets` | No | Discover names / ids / tags. Agents check this before asking for a key |
 | `get_secret_metadata` | No | One secret’s metadata |
 | `inject_secret` | **No** (writes env file) | Agent access by name when the CLI `run` command cannot be used |
 | `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |

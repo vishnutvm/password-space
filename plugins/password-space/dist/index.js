@@ -29329,7 +29329,7 @@ var VaultStore = class {
     if (!existing)
       data.secrets.push(row);
     this.persist();
-    this.audit(existing ? "update" : "create", row.id, name, "human", null);
+    this.audit(existing ? "update" : "create", row.id, name, input.actor ?? "human", null);
     return this.getMetadata(row.id);
   }
   writeValue(row, value) {
@@ -29345,7 +29345,11 @@ var VaultStore = class {
     const key = this.hookKey(true);
     row.guard = guardPrint(key, value);
   }
-  deleteSecret(idOrName) {
+  /** True when a secret with this exact id or (case-insensitive) name exists. */
+  hasSecret(idOrName) {
+    return this.findRow(idOrName) !== void 0;
+  }
+  deleteSecret(idOrName, actor = "human") {
     const data = this.requireReady();
     const row = this.findRow(idOrName);
     if (!row)
@@ -29354,7 +29358,7 @@ var VaultStore = class {
       this.requireKeychain().delete(this.account(row.id));
     data.secrets = data.secrets.filter((s) => s.id !== row.id);
     this.persist();
-    this.audit("delete", row.id, row.name, "human", null);
+    this.audit("delete", row.id, row.name, actor, null);
   }
   /**
    * Move every value to another backend.
@@ -29607,6 +29611,14 @@ function shellEscape(value) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+// packages/vault/dist/env-name.js
+function envNameFor(secretName) {
+  const cleaned = secretName.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!cleaned)
+    return "SECRET";
+  return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
+}
+
 // packages/vault/dist/index.js
 function openVault(opts = {}) {
   const dataDir2 = opts.dataDir ?? defaultDataDir();
@@ -29622,6 +29634,7 @@ function jsonResult(payload, opts) {
   return {
     content: [{ type: "text", text }],
     structuredContent: payload,
+    ...opts?.isError ? { isError: true } : {},
     ...opts?.redact ? { _meta: { redact_in_transcript: true } } : {}
   };
 }
@@ -29671,7 +29684,7 @@ var NodeVersionError = class extends Error {
     this.required = `>=${requiredMajor}`;
   }
 };
-var TRUST_LINE = "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal; never paste values into chat.";
+var TRUST_LINE = "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal, or hand one to your agent once and it saves it with store_secret; after that it is used by name and never shown again.";
 function storageFields(store) {
   const info = store.storageInfo();
   return {
@@ -29761,6 +29774,11 @@ function buildPrimaryAction(initialized, _unlocked = true, _session = true, prer
         id: "list_secrets",
         title: "List via MCP",
         do_this: "After Terminal add, call list_secrets or vault_status (no values)."
+      },
+      {
+        id: "store_secret",
+        title: "Agent saves a key the user hands over",
+        do_this: "If the user gives you a credential, call store_secret with a descriptive name, then use it by name with run. Never repeat the value."
       },
       {
         id: "cli_menu",
@@ -29956,15 +29974,6 @@ function vaultStatusTool(store, dataDir2) {
     copy_paste_command: primary_action.copy_paste_command
   });
 }
-function vaultDeleteSecretTool(store, name) {
-  assertReady(store);
-  store.deleteSecret(name);
-  return jsonResult({
-    ok: true,
-    deleted: name,
-    note: "Secret removed. Value was not returned."
-  });
-}
 function vaultManagerTool(store, dataDir2) {
   clearExpiredInjectFiles(dataDir2);
   const status = vaultStatusTool(store, dataDir2);
@@ -29995,8 +30004,8 @@ function vaultManagerTool(store, dataDir2) {
     secrets,
     capabilities: {
       list: "list_secrets (MCP) or Terminal list",
-      add_or_edit: "Terminal set / interactive menu only",
-      remove: "Terminal remove (or vault_delete_secret)",
+      add_or_edit: "Terminal set, or store_secret (MCP) when the user hands the agent a credential",
+      remove: "Terminal remove, or remove_secret (MCP)",
       lock: "Not needed",
       unlock: "Not needed",
       change_passphrase: "Not used",
@@ -30006,26 +30015,127 @@ function vaultManagerTool(store, dataDir2) {
     elicitation_note: "Secret values are collected in Terminal only \u2014 never via MCP elicitation."
   });
 }
-function vaultSetSecretTool(store, args) {
-  store.ensure();
-  const meta = publicMeta(
-    store.setSecret({
-      name: args.name,
-      value: args.value,
-      tags: args.tags ?? [],
-      notes: args.notes ?? null
-    })
-  );
-  const payload = {
-    ok: true,
-    secret: meta,
-    note: "Secret stored. Value was not returned \u2014 do not repeat it in chat. Prefer Terminal set for humans; agents prefer inject_secret."
-  };
-  const serialized = JSON.stringify(payload);
-  if (args.value && serialized.includes(args.value)) {
-    throw new Error("Refusing to return tool result that contains secret plaintext");
+var AGENT_ACTOR = "mcp-agent";
+var SECRET_NAME_MAX = 128;
+var MIN_LEAK_CHECK_LENGTH = 4;
+function scrubValue(text, value) {
+  if (!value) return text;
+  return text.split(value).join("[REDACTED]");
+}
+function invalidName(name) {
+  if (!name) return "Secret name is required.";
+  if (name.length > SECRET_NAME_MAX) {
+    return `Secret name is too long (max ${SECRET_NAME_MAX} characters).`;
   }
-  return jsonResult(payload, { redact: true });
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    return "Secret name cannot contain line breaks or control characters.";
+  }
+  return null;
+}
+function useByName(name) {
+  const envVar = envNameFor(name);
+  return {
+    env_var: envVar,
+    run_command: bundledCliCommand(`run -s ${JSON.stringify(name)} -- <command>`),
+    run_note: `The command sees the value as $${envVar}; its output is redacted. Never echo or print the variable.`
+  };
+}
+function storeSecretTool(store, args) {
+  const name = (args.name ?? "").trim();
+  const value = args.value;
+  const nameProblem = invalidName(name);
+  if (nameProblem) {
+    return jsonResult({ ok: false, code: "invalid_name", error: nameProblem }, { isError: true });
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    return jsonResult(
+      { ok: false, code: "invalid_value", error: "Secret value is required." },
+      { isError: true }
+    );
+  }
+  if (value.length >= MIN_LEAK_CHECK_LENGTH) {
+    const visible = [name, args.notes ?? "", ...args.tags ?? []];
+    if (visible.some((field) => field.includes(value))) {
+      return jsonResult(
+        {
+          ok: false,
+          code: "value_in_metadata",
+          error: "The secret value appears in the name, notes or tags, which are stored and shown in plain text. Use a descriptive name (e.g. GITHUB_TOKEN) and pass the secret only as value."
+        },
+        { isError: true }
+      );
+    }
+  }
+  try {
+    store.ensure();
+    const existing = store.hasSecret(name) ? publicMeta(store.getMetadata(name)) : null;
+    if (existing && !args.overwrite) {
+      return jsonResult(
+        {
+          ok: false,
+          code: "already_exists",
+          error: `A secret named "${existing.name}" already exists. Nothing was changed.`,
+          secret: existing,
+          how_to_replace: "Only if the user wants to replace it (e.g. a rotated key), call store_secret again with overwrite: true. Otherwise pick a different name, or just use the existing one.",
+          ...useByName(existing.name)
+        },
+        { isError: true }
+      );
+    }
+    const meta = publicMeta(
+      store.setSecret({
+        id: existing?.id,
+        // Keep the stored spelling when replacing (names match case-insensitively).
+        name: existing?.name ?? name,
+        value,
+        tags: args.tags ?? existing?.tags ?? [],
+        notes: args.notes ?? existing?.notes ?? null,
+        actor: AGENT_ACTOR
+      })
+    );
+    const payload = {
+      ok: true,
+      action: existing ? "updated" : "created",
+      secret: meta,
+      storage: store.storageInfo().backend,
+      ...useByName(meta.name),
+      next: [
+        `Tell the user it is saved as "${meta.name}" (do not repeat the value).`,
+        "From now on use it by name with run_command. Do not ask the user for it again."
+      ],
+      note: "Value stored and not returned. The copy the user pasted into chat stays in this conversation's history."
+    };
+    const serialized = JSON.stringify(payload);
+    if (serialized.includes(value)) {
+      throw new Error("Refusing to return tool result that contains secret plaintext");
+    }
+    return jsonResult(payload, { redact: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(scrubValue(message, value));
+  }
+}
+function removeSecretTool(store, name) {
+  assertReady(store);
+  const target = (name ?? "").trim();
+  if (!target || !store.hasSecret(target)) {
+    return jsonResult(
+      {
+        ok: false,
+        code: "not_found",
+        error: `No secret named "${target}". Nothing was removed.`,
+        available: store.listSecrets().map((m2) => m2.name)
+      },
+      { isError: true }
+    );
+  }
+  const meta = store.getMetadata(target);
+  store.deleteSecret(meta.id, AGENT_ACTOR);
+  return jsonResult({
+    ok: true,
+    removed: meta.name,
+    note: "Secret removed from the vault (and the OS keychain when used). Value was not returned."
+  });
 }
 function listSecretsTool(store, tag) {
   assertReady(store);
@@ -30180,23 +30290,6 @@ server.registerTool(
     }
   }
 );
-server.registerTool(
-  "vault_delete_secret",
-  {
-    title: "Remove a credential",
-    description: "Deletes a saved credential by name. Never returns the secret value.",
-    inputSchema: {
-      name: external_exports.string().min(1).describe("Secret name or id to delete")
-    }
-  },
-  async ({ name }) => {
-    try {
-      return await withVaultStore(dataDir, (store) => vaultDeleteSecretTool(store, name));
-    } catch (err) {
-      return errorResult(err);
-    }
-  }
-);
 K3(
   server,
   "vault_manager",
@@ -30248,34 +30341,63 @@ N3(
     };
   }
 );
+var STORE_SECRET_DESCRIPTION = "Save a credential (API key, token, password) the user gave you, under a name, so you and later sessions can use it by name instead of asking again. Call it as soon as the user hands you a secret, then use it with the CLI run command (returned as run_command). The value goes to the OS keychain and is never returned. An existing name is not replaced unless overwrite is true. Never repeat the value in chat.";
+var storeSecretSchema = {
+  name: external_exports.string().min(1).max(128).describe("Descriptive name, e.g. GITHUB_TOKEN or OPENAI_API_KEY. Never the secret itself."),
+  value: external_exports.string().min(1).describe("The secret value. Stored in the keychain; never echoed back."),
+  overwrite: external_exports.boolean().optional().describe("Set true only to replace an existing secret of the same name (e.g. a rotated key). Default false."),
+  tags: external_exports.array(external_exports.string()).optional().describe('Optional labels (e.g. ["github"]). Plain text, not secret.'),
+  notes: external_exports.string().optional().describe("Optional reminder, e.g. what the key is for. Plain text, not secret.")
+};
+var storeSecretHandler = async (args) => {
+  try {
+    return await withVaultStore(dataDir, (store) => storeSecretTool(store, args));
+  } catch (err) {
+    return errorResult(err, args.value);
+  }
+};
+server.registerTool(
+  "store_secret",
+  { title: "Save a secret to the vault", description: STORE_SECRET_DESCRIPTION, inputSchema: storeSecretSchema },
+  storeSecretHandler
+);
 server.registerTool(
   "vault_set_secret",
   {
-    title: "Save a password or API token",
-    description: "Stores a named credential (value goes to the OS keychain). Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
-    inputSchema: {
-      name: external_exports.string().min(1).describe("Short label for this credential (e.g. GITHUB_TOKEN, OpenAI API key)."),
-      value: external_exports.string().min(1).describe(
-        "The secret itself (token, password, API key). Enter in the approval form only \u2014 never in chat."
-      ),
-      tags: external_exports.array(external_exports.string()).optional().describe('Optional labels for filtering (e.g. ["api", "github"]).'),
-      notes: external_exports.string().optional().describe("Optional reminder text (not secret).")
-    }
+    title: "Save a secret (alias of store_secret)",
+    description: `Same as store_secret. ${STORE_SECRET_DESCRIPTION}`,
+    inputSchema: storeSecretSchema
   },
-  async ({ name, value, tags, notes }) => {
-    try {
-      return await withVaultStore(
-        dataDir,
-        (store) => vaultSetSecretTool(store, { name, value, tags, notes })
-      );
-    } catch (err) {
-      return errorResult(err);
-    }
+  storeSecretHandler
+);
+var REMOVE_SECRET_DESCRIPTION = "Permanently delete a saved secret by name (its keychain value and its name). Only when the user asks to remove or forget it. Never returns the value.";
+var removeSecretSchema = {
+  name: external_exports.string().min(1).describe("Name (or id) of the secret to delete, as shown by list_secrets.")
+};
+var removeSecretHandler = async ({ name }) => {
+  try {
+    return await withVaultStore(dataDir, (store) => removeSecretTool(store, name));
+  } catch (err) {
+    return errorResult(err);
   }
+};
+server.registerTool(
+  "remove_secret",
+  { title: "Delete a secret from the vault", description: REMOVE_SECRET_DESCRIPTION, inputSchema: removeSecretSchema },
+  removeSecretHandler
+);
+server.registerTool(
+  "vault_delete_secret",
+  {
+    title: "Delete a secret (alias of remove_secret)",
+    description: `Same as remove_secret. ${REMOVE_SECRET_DESCRIPTION}`,
+    inputSchema: removeSecretSchema
+  },
+  removeSecretHandler
 );
 server.tool(
   "list_secrets",
-  "List saved credential names (no values). Use before inject_secret.",
+  "List saved credential names (no values). Check this first whenever a task needs an API key, token or password: if it is here, use it by name and do not ask the user for it again.",
   {
     tag: external_exports.string().optional().describe("Optional tag filter")
   },
@@ -30334,8 +30456,8 @@ server.tool(
     }
   }
 );
-function errorResult(err) {
-  const message = err instanceof Error ? err.message : String(err);
+function errorResult(err, secretValue) {
+  const message = scrubValue(err instanceof Error ? err.message : String(err), secretValue);
   const payload = { ok: false, error: message };
   if (err instanceof NodeVersionError) {
     payload.code = err.code;
