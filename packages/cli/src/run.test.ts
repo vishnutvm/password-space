@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "esbuild";
 import { openVault } from "@password-space/vault";
-import { StreamRedactor, envNameFor, parseRunArgs } from "./run.js";
+import { StreamRedactor, envNameFor, parseRunArgs, quoteWindowsArg } from "./run.js";
 
 describe("parseRunArgs", () => {
   it("splits options from the command at --", () => {
@@ -33,6 +33,22 @@ describe("envNameFor", () => {
     expect(envNameFor("openai-api-key")).toBe("OPENAI_API_KEY");
     expect(envNameFor("1password")).toBe("_1PASSWORD");
     expect(envNameFor("***")).toBe("SECRET");
+  });
+});
+
+describe("quoteWindowsArg", () => {
+  it("leaves plain arguments alone", () => {
+    expect(quoteWindowsArg("gh")).toBe("gh");
+    expect(quoteWindowsArg("--flag=1")).toBe("--flag=1");
+    expect(quoteWindowsArg("C:\\tools\\node.exe")).toBe("C:\\tools\\node.exe");
+  });
+
+  it("quotes paths with spaces and scripts with quotes", () => {
+    expect(quoteWindowsArg("C:\\Program Files\\nodejs\\node.exe")).toBe('"C:\\Program Files\\nodejs\\node.exe"');
+    expect(quoteWindowsArg("console.log('a b')")).toBe(`"console.log('a b')"`);
+    expect(quoteWindowsArg('say "hi"')).toBe('"say \\"hi\\""');
+    expect(quoteWindowsArg("")).toBe('""');
+    expect(quoteWindowsArg("dir with space\\")).toBe('"dir with space\\\\"');
   });
 });
 
@@ -109,9 +125,32 @@ describe("password-space run (end to end)", () => {
     expect(r.status).toBe(0);
   });
 
-  it("--no-redact passes output through untouched", () => {
+  it("--no-redact is refused when output is piped (agents, scripts)", () => {
     const r = run(["--no-redact", "-s", "api token", ...printEnv("API_TOKEN")]);
-    expect(r.stdout).toBe(VALUE);
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toContain(VALUE);
+    expect(r.stderr).toMatch(/--no-redact only works .* interactive terminal/);
+  });
+
+  it("get refuses to print a value without an interactive terminal", () => {
+    for (const extra of [[], ["--json"]]) {
+      const r = spawnSync(process.execPath, [cli, "get", "api token", ...extra], {
+        encoding: "utf8",
+        env: { ...process.env, PASSWORD_SPACE_HOME: join(dir, "home") },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stdout + r.stderr).not.toContain(VALUE);
+      expect(r.stderr).toMatch(/interactive terminal/);
+      expect(r.stderr).toMatch(/run -s "api token" -- <command>/);
+    }
+    // Piping a "y" into stdin does not help either.
+    const piped = spawnSync(process.execPath, [cli, "get", "api token"], {
+      encoding: "utf8",
+      input: "y\n",
+      env: { ...process.env, PASSWORD_SPACE_HOME: join(dir, "home") },
+    });
+    expect(piped.status).toBe(1);
+    expect(piped.stdout).not.toContain(VALUE);
   });
 
   it("propagates the child's exit code", () => {

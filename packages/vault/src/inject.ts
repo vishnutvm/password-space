@@ -6,12 +6,19 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { injectDir } from "./paths.js";
 
-export const DEFAULT_INJECT_TTL_MS = 5 * 60 * 1000;
+/**
+ * Inject files hold a plaintext value on disk, so they live for one minute by
+ * default. The MCP server also deletes each file it wrote when its TTL passes
+ * and when the server exits (see scheduleInjectCleanup), not only on the next
+ * inject.
+ */
+export const DEFAULT_INJECT_TTL_MS = 60 * 1000;
 
 export type InjectHandle = {
   /** Opaque handle agents may reference in chat */
@@ -44,8 +51,7 @@ export function writeInjectFile(
   },
 ): InjectHandle {
   clearExpiredInjectFiles(dataDir);
-  const dir = injectDir(dataDir);
-  mkdirSync(dir, { recursive: true });
+  const dir = ensureInjectDir(dataDir);
   const token = randomBytes(16).toString("hex");
   const envVar = opts.envVar ?? sanitizeEnvName(opts.secretName);
   const envFile = join(dir, `${token}.env`);
@@ -78,8 +84,43 @@ export function writeInjectFile(
   };
 }
 
+/** Create the inject dir owner-only (0700), tightening an existing one. */
+export function ensureInjectDir(dataDir: string): string {
+  const dir = injectDir(dataDir);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    // Windows / unusual filesystems: best effort
+  }
+  return dir;
+}
+
 export function clearInjectFile(envFile: string): void {
-  if (existsSync(envFile)) unlinkSync(envFile);
+  try {
+    if (existsSync(envFile)) unlinkSync(envFile);
+  } catch {
+    // already gone or not ours to delete
+  }
+}
+
+/**
+ * Delete `envFile` when it expires, without keeping the process alive.
+ * Returns a cancel function. Used by the MCP server after inject_secret.
+ */
+export function scheduleInjectCleanup(
+  envFile: string,
+  expiresAt: string,
+  now = Date.now(),
+  onCleared?: () => void,
+): () => void {
+  const delay = Math.max(0, Date.parse(expiresAt) - now);
+  const timer = setTimeout(() => {
+    clearInjectFile(envFile);
+    onCleared?.();
+  }, delay);
+  timer.unref?.();
+  return () => clearTimeout(timer);
 }
 
 /**
@@ -96,8 +137,11 @@ export function clearExpiredInjectFiles(dataDir: string, now = Date.now()): numb
     try {
       const body = readFileSync(full, "utf8");
       const match = /^# password-space inject — expires (.+)$/m.exec(body);
-      const expiresMs = match ? Date.parse(match[1]!) : NaN;
-      if (Number.isFinite(expiresMs) && expiresMs <= now) {
+      let expiresMs = match ? Date.parse(match[1]!) : NaN;
+      if (!Number.isFinite(expiresMs)) {
+        expiresMs = statSync(full).mtimeMs + DEFAULT_INJECT_TTL_MS;
+      }
+      if (expiresMs <= now) {
         unlinkSync(full);
         removed++;
       }
