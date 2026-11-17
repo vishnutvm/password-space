@@ -34,7 +34,7 @@ Local **plain-text named secrets** on the user's machine (`~/.password-space/sec
 - Ask the user to edit **`mcp.json`** or explain MCP
 - Lead with Vault Manager / App forms for add or remove
 - Tell newcomers to clone the repo or run `pnpm install` for day-1 setup
-- Require `vault_unlock` / passphrase before `inject_secret`
+- Ask for a passphrase or an unlock step (there is none)
 - Mention **Plugins → Configure** for vault home (default is `~/.password-space`)
 
 ### Vault Manager
@@ -45,7 +45,6 @@ Do **not** call **`vault_manager`** for setup or secrets. It is status-only. Hum
 
 - **Terminal** `set` / `remove` / interactive menu — primary way to add or delete
 - **`list_secrets`** / **`vault_status`** / **`inject_secret`** — MCP by name (no unlock)
-- Soft-compat: `vault_init` / `vault_unlock` / `vault_lock` may still exist but are **not** required
 
 ## Legacy encrypted vault
 

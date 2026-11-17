@@ -5,9 +5,7 @@ import {
   VaultStore,
   clearExpiredInjectFiles,
   hasLegacyEncryptedVault,
-  lockVaultSession,
   secretsStorePath,
-  unlockVaultToSession,
   vaultDbPath,
   writeInjectFile,
   type InjectHandle,
@@ -35,10 +33,6 @@ function jsonResult(
   };
 }
 
-/** @deprecated Passphrase path removed — kept for soft-compat messaging. */
-export const HOST_LIMITATION =
-  "Lock/unlock/passphrase are not required. Name secrets in Terminal, then use inject_secret by name.";
-
 /** Bundled CLI path inside the marketplace plugin package (next to MCP `dist/index.js`). */
 export const BUNDLED_CLI_RELATIVE = "dist/cli.js";
 
@@ -51,17 +45,12 @@ export const BUNDLED_CLI_NODE =
  */
 export const CLI_SETUP_COMMANDS = {
   plugin_setup: `${BUNDLED_CLI_NODE} setup`,
-  /** @deprecated Unlock is a no-op for the plain store. */
-  plugin_unlock: `${BUNDLED_CLI_NODE} unlock`,
   plugin_set: `${BUNDLED_CLI_NODE} set`,
   from_clone_optional:
     "cd /path/to/password-space && pnpm install && pnpm build && pnpm password-space setup",
-  unlock_from_clone_optional:
-    "cd /path/to/password-space && pnpm password-space unlock",
   set_from_clone_optional:
     "cd /path/to/password-space && pnpm password-space set",
   global_cli: "password-space setup",
-  unlock_global: "password-space unlock",
   set_global: "password-space set",
 } as const;
 
@@ -86,29 +75,12 @@ function shellQuote(path: string): string {
 }
 
 export function bundledCliCommand(
-  subcommand: "setup" | "unlock" | "set" | string = "",
+  subcommand: "setup" | "set" | string = "",
 ): string {
   const abs = resolveBundledCliPath();
   const base = abs ? `node ${shellQuote(abs)}` : BUNDLED_CLI_NODE;
   const sub = subcommand.trim();
   return sub ? `${base} ${sub}` : base;
-}
-
-/** @deprecated MCP Environment passphrase is unused for the plain store. */
-export const MCP_ENV_PATH =
-  "Passphrases are not used. Add secrets in Terminal with the plugin CLI set command.";
-
-export class PassphraseRequiredError extends Error {
-  readonly code = "passphrase_missing" as const;
-  readonly host_limitation = HOST_LIMITATION;
-  readonly recommended_path = "cli_setup" as const;
-
-  constructor() {
-    super(
-      `Passphrases are not used. Open Terminal and run \`${CLI_SETUP_COMMANDS.plugin_setup}\` then \`${CLI_SETUP_COMMANDS.plugin_set}\` — never paste secrets into chat.`,
-    );
-    this.name = "PassphraseRequiredError";
-  }
 }
 
 export class NodeVersionError extends Error {
@@ -189,33 +161,6 @@ export function onboardingProgress(
   };
 }
 
-/** @deprecated Env passphrase unused; always false for product path. */
-export function isPassphraseConfiguredInEnv(): boolean {
-  return Boolean(process.env.PASSWORD_SPACE_PASSPHRASE?.trim());
-}
-
-/**
- * Soft-compat: passphrase resolution still works for legacy callers but
- * vault_init no longer requires it.
- */
-export function resolvePassphrase(toolArg?: string): string {
-  const fromArg = toolArg?.trim();
-  if (fromArg) {
-    if (fromArg.length < 8) {
-      throw new Error("Passphrase must be at least 8 characters.");
-    }
-    return fromArg;
-  }
-  const fromEnv = process.env.PASSWORD_SPACE_PASSPHRASE?.trim();
-  if (fromEnv) {
-    if (fromEnv.length < 8) {
-      throw new Error("PASSWORD_SPACE_PASSPHRASE must be at least 8 characters.");
-    }
-    return fromEnv;
-  }
-  throw new PassphraseRequiredError();
-}
-
 export type OnboardingStep = {
   id: string;
   phase: string;
@@ -229,13 +174,7 @@ export type PrimaryAction = {
   id:
     | "fix_node"
     | "cli_setup"
-    | "cli_unlock"
     | "cli_set"
-    | "vault_init"
-    | "vault_unlock"
-    | "vault_set_secret"
-    | "vault_init_env"
-    | "vault_unlock_env"
     | "vault_manager";
   title: string;
   do_this: string;
@@ -243,12 +182,8 @@ export type PrimaryAction = {
   never: string;
   recommended_path?:
     | "cli_setup"
-    | "cli_unlock"
     | "cli_set"
-    | "mcp_env"
-    | "vault_manager"
-    | "mcp_form";
-  host_limitation?: string;
+    | "vault_manager";
   copy_paste_command?: string;
   alternatives?: Array<{
     id: string;
@@ -432,7 +367,6 @@ function recoveryGuidance(opts: {
 export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonResult {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
-  const unlocked = store.isUnlocked || !initialized ? store.isUnlocked : true;
   const storePath = secretsStorePath(dataDir);
   const storeExists = existsSync(storePath);
   const legacyEncrypted = hasLegacyEncryptedVault(dataDir);
@@ -472,10 +406,9 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     legacy_encrypted_vault: legacyEncrypted,
     legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir) : null,
     initialized,
-    unlocked: initialized ? true : unlocked,
+    unlocked: initialized,
     session: true,
     prerequisites: prereq,
-    passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     checklist: steps,
@@ -537,7 +470,6 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
     session: true,
     secret_count: initialized ? store.listSecrets().length : 0,
     prerequisites: prereq,
-    passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     headline: progress.headline,
@@ -555,113 +487,6 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
       : `Add secrets in Terminal: ${bundledCliCommand("set")}`,
     recommended_path: primary_action.recommended_path ?? null,
     copy_paste_command: primary_action.copy_paste_command,
-  });
-}
-
-export async function vaultInitTool(
-  store: VaultStore,
-  dataDir: string,
-  _args: { passphrase?: string } = {},
-): Promise<ToolJsonResult> {
-  assertNodeVersion();
-  if (store.isInitialized()) {
-    return jsonResult({
-      ok: true,
-      code: "store_already_exists",
-      deprecated: true,
-      initialized: true,
-      unlocked: true,
-      data_dir: dataDir,
-      store_path: secretsStorePath(dataDir),
-      db_path: secretsStorePath(dataDir),
-      note: "Store already exists. Lock/unlock/passphrase are not needed. Add secrets in Terminal.",
-      howToFix: `Add credentials with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
-      what_to_do: [`Run: ${bundledCliCommand("set")}`],
-      recommended_path: "cli_set",
-      primary_action: buildPrimaryAction(true, true, true, true),
-    });
-  }
-  // Passphrase ignored — plain store.
-  await store.init();
-  const nextAction = buildPrimaryAction(true, true, true, true);
-  return jsonResult({
-    ok: true,
-    initialized: true,
-    unlocked: true,
-    deprecated: true,
-    data_dir: dataDir,
-    store_path: secretsStorePath(dataDir),
-    db_path: secretsStorePath(dataDir),
-    setup_state: "ready",
-    storage: "plain-json",
-    lock_unlock_needed: false,
-    next: nextAction.do_this,
-    recommended_path: nextAction.recommended_path,
-    copy_paste_command: nextAction.copy_paste_command,
-    primary_action: nextAction,
-    note: "Plain store created. Prefer Terminal setup/set. Passphrase/unlock are not used.",
-  });
-}
-
-export async function vaultUnlockTool(
-  dataDir: string,
-  _args: { passphrase?: string; ttl_hours?: number; until_lock?: boolean } = {},
-): Promise<ToolJsonResult> {
-  assertNodeVersion();
-  // Soft-compat: ensure store exists path is readable; no passphrase required.
-  try {
-    await unlockVaultToSession(_args.passphrase ?? "unused-passphrase-xx", {
-      dataDir,
-    });
-  } catch {
-    // If store missing, still return soft-deprecate guidance
-    return jsonResult({
-      ok: false,
-      unlocked: false,
-      deprecated: true,
-      code: "store_missing",
-      data_dir: dataDir,
-      note: "Unlock is not needed for the plain store. Run Terminal setup first.",
-      copy_paste_command: bundledCliCommand("setup"),
-      recommended_path: "cli_setup",
-    });
-  }
-  return jsonResult({
-    ok: true,
-    unlocked: true,
-    deprecated: true,
-    data_dir: dataDir,
-    expires_at: null,
-    until_lock: true,
-    lock_unlock_needed: false,
-    note: "Unlock is a no-op. The store is local plain text — agents can inject_secret by name without unlock.",
-  });
-}
-
-export function vaultLockTool(dataDir: string): ToolJsonResult {
-  lockVaultSession({ dataDir });
-  return jsonResult({
-    ok: true,
-    locked: false,
-    deprecated: true,
-    data_dir: dataDir,
-    note: "Lock is a no-op. The plain store stays readable locally; there is no unlock session.",
-  });
-}
-
-export async function vaultChangePassphraseTool(
-  dataDir: string,
-  _args: { current_passphrase?: string; new_passphrase?: string; ttl_hours?: number },
-): Promise<ToolJsonResult> {
-  assertNodeVersion();
-  return jsonResult({
-    ok: false,
-    changed: false,
-    deprecated: true,
-    code: "passphrase_not_used",
-    data_dir: dataDir,
-    error: "Passphrases are not used. The store is local plain text.",
-    note: "Add/remove secrets in Terminal. Lock/unlock/change-passphrase are not part of the product path.",
   });
 }
 

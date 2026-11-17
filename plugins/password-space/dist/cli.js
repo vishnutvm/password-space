@@ -4,9 +4,6 @@
 import { createInterface } from "node:readline";
 import { stdin as input, stdout as output, exit } from "node:process";
 
-// packages/vault/dist/crypto.js
-var SCRYPT_N = 2 ** 15;
-
 // packages/vault/dist/paths.js
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -59,12 +56,9 @@ import { randomUUID } from "node:crypto";
 var STORE_VERSION = 1;
 var VaultStore = class {
   storePath;
-  /** @deprecated Prefer storePath — kept for MCP/CLI status fields. */
-  dbPath;
   data = null;
   constructor(storePath) {
     this.storePath = storePath;
-    this.dbPath = storePath;
     mkdirSync(dirname(storePath), { recursive: true });
     if (existsSync2(storePath)) {
       this.data = this.readFile();
@@ -85,18 +79,6 @@ var VaultStore = class {
       storage: "plain-json"
     };
   }
-  /**
-   * Create an empty store. Passphrase is ignored (soft-compat with old MCP tools).
-   */
-  async init(_passphrase) {
-    if (this.isInitialized()) {
-      throw new VaultError("Store already initialized", "ALREADY_INITIALIZED");
-    }
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    this.data = { version: STORE_VERSION, createdAt: now, secrets: [] };
-    this.persist();
-    this.audit("init", null, null, "human", "plain-json store created");
-  }
   /** Ensure the store file exists (setup / first use). */
   ensure() {
     if (!this.isInitialized()) {
@@ -107,37 +89,6 @@ var VaultStore = class {
     } else if (!this.data) {
       this.data = this.readFile();
     }
-  }
-  /** Always true for the plain store once initialized (no unlock gate). */
-  get isUnlocked() {
-    return this.isInitialized();
-  }
-  /**
-   * Soft-compat: no-op unlock. Returns an empty buffer (no vault key).
-   */
-  async unlock(_passphrase) {
-    if (!this.isInitialized()) {
-      throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
-    }
-    this.data = this.readFile();
-    this.audit("unlock", null, null, "human", "noop \u2014 plain store needs no unlock");
-    return Buffer.alloc(0);
-  }
-  /** Soft-compat: no vault key to restore. */
-  unlockWithKey(_vaultKey) {
-    if (!this.isInitialized()) {
-      throw new VaultError("Store not initialized", "NOT_INITIALIZED");
-    }
-    this.data = this.readFile();
-  }
-  /** Soft-compat: no-op (nothing to lock). */
-  lock() {
-  }
-  /**
-   * Soft-compat: passphrase change is not applicable.
-   */
-  async changePassphrase(_currentPassphrase, _nextPassphrase) {
-    throw new VaultError("Passphrases are not used. The store is local plain text \u2014 lock/unlock/change-passphrase are not needed.", "DEPRECATED");
   }
   requireReady() {
     if (!this.isInitialized() || !this.data) {
@@ -309,11 +260,6 @@ var VaultStore = class {
   }
 };
 
-// packages/vault/dist/session.js
-var DEFAULT_TTL_MS = 8 * 60 * 60 * 1e3;
-var SESSION_TTL_1_DAY_MS = 24 * 60 * 60 * 1e3;
-var SESSION_TTL_1_WEEK_MS = 7 * 24 * 60 * 60 * 1e3;
-
 // packages/vault/dist/inject.js
 var DEFAULT_INJECT_TTL_MS = 5 * 60 * 1e3;
 
@@ -442,7 +388,6 @@ Commands:
   onboard                Print next Terminal step
   get <name>             Print secret value (human only \u2014 not for agents)
   audit                  Recent access events (no values)
-  unlock | lock          No-ops (kept for compatibility \u2014 not needed)
   help                   Show this help
 
 Options:
@@ -459,7 +404,6 @@ Environment:
 
 Store file:  ~/.password-space/secrets.json  (mode 0600, plain values at rest)
 Agents use MCP inject_secret / list_secrets by name \u2014 never paste secrets in chat.
-Lock/unlock/passphrase are not part of the product path.
 `);
 }
 function storeSnapshot(dataDir) {
@@ -734,15 +678,9 @@ async function main() {
         break;
       }
       case "unlock":
-        console.log("\u2713 Unlock not needed \u2014 the store is local plain text.");
-        console.log("  Add secrets with set; agents use inject_secret by name.");
-        break;
       case "lock":
-        console.log("\u2713 Lock not needed \u2014 the store stays readable locally.");
-        console.log("  (No unlock session is used.)");
-        break;
       case "change-passphrase":
-        console.log("Passphrases are not used. The store is local plain text.");
+        console.log(`${command} is no longer needed: there is no passphrase or unlock session.`);
         break;
       case "status":
         await runStatus(dataDir, args.flags);

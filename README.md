@@ -158,8 +158,6 @@ Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugi
 | --- | --- | --- |
 | `vault_onboard` | No | Guided next step (`primary_action`) |
 | `vault_status` | No | Store ready? Next step hint |
-| `vault_init` | No | Soft-compat: ensure store (prefer Terminal setup) |
-| `vault_unlock` / `vault_lock` | No | Soft-compat no-ops (not required) |
 | `vault_set_secret` | **No** (metadata only) | Prefer Terminal `set` for humans |
 | `list_secrets` | No | Discover names / ids / tags |
 | `get_secret_metadata` | No | One secret’s metadata |

@@ -5,7 +5,7 @@
  * Bundled for marketplace installs (`plugins/password-space/dist/index.js`).
  * End users name secrets via Terminal CLI bundled at `dist/cli.js`
  * (sibling of this file) — no monorepo clone required.
- * Prefer inject_secret over resolve_secret. Lock/unlock not required.
+ * Prefer inject_secret over resolve_secret.
  *
  * Never log secret values.
  */
@@ -24,22 +24,16 @@ import { defaultDataDir } from "@password-space/vault";
 import {
   CLI_SETUP_COMMANDS,
   bundledCliCommand,
-  HOST_LIMITATION,
   NodeVersionError,
-  PassphraseRequiredError,
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
   resolveSecretTool,
-  vaultChangePassphraseTool,
   vaultDeleteSecretTool,
-  vaultInitTool,
-  vaultLockTool,
   vaultManagerTool,
   vaultOnboardTool,
   vaultSetSecretTool,
   vaultStatusTool,
-  vaultUnlockTool,
 } from "./tools.js";
 import { withVaultStore } from "./with-store.js";
 
@@ -76,18 +70,6 @@ function loadVaultManagerHtml(): string {
 // defaultDataDir ignores empty / unresolved `${PASSWORD_SPACE_HOME}` placeholders
 const dataDir = defaultDataDir();
 
-/** Soft-compat only — passphrases are unused for the plain store. */
-const passphraseSchema = z
-  .string()
-  .min(8, "Passphrase must be at least 8 characters.")
-  .describe(
-    "Unused for the plain-text store (soft-compat). Prefer Terminal setup/set — never paste secrets into chat.",
-  );
-
-const optionalPassphraseShape = {
-  passphrase: passphraseSchema.optional(),
-};
-
 const server = new McpServer({
   name: "password-space",
   version: "0.1.0",
@@ -119,93 +101,6 @@ server.registerTool(
   async () => {
     try {
       return await withVaultStore(dataDir, (store) => vaultStatusTool(store, dataDir));
-    } catch (err) {
-      return errorResult(err);
-    }
-  },
-);
-
-server.registerTool(
-  "vault_init",
-  {
-    title: "Create your store (optional)",
-    description:
-      "Soft-compat: ensures the local plain-text store exists. Prefer Terminal setup/set. Passphrase is ignored. No unlock needed afterward.",
-    inputSchema: optionalPassphraseShape,
-  },
-  async ({ passphrase }) => {
-    try {
-      return await withVaultStore(dataDir, (store) => vaultInitTool(store, dataDir, { passphrase }));
-    } catch (err) {
-      return errorResult(err);
-    }
-  },
-);
-
-server.registerTool(
-  "vault_unlock",
-  {
-    title: "Unlock (not needed)",
-    description:
-      "Soft-compat no-op. The plain-text store does not use unlock sessions. Prefer Terminal set + inject_secret.",
-    inputSchema: {
-      ...optionalPassphraseShape,
-      ttl_hours: z
-        .number()
-        .min(0.1)
-        .max(168)
-        .optional()
-        .describe("Ignored — unlock is not used."),
-      until_lock: z
-        .boolean()
-        .optional()
-        .describe("Ignored — unlock is not used."),
-    },
-  },
-  async ({ passphrase, ttl_hours, until_lock }) => {
-    try {
-      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours, until_lock });
-    } catch (err) {
-      return errorResult(err);
-    }
-  },
-);
-
-server.tool(
-  "vault_lock",
-  "Soft-compat no-op — the plain-text store does not use unlock sessions.",
-  {},
-  async () => {
-    try {
-      return vaultLockTool(dataDir);
-    } catch (err) {
-      return errorResult(err);
-    }
-  },
-);
-
-server.registerTool(
-  "vault_change_passphrase",
-  {
-    title: "Change passphrase (not used)",
-    description:
-      "Soft-compat: passphrases are not used for the plain-text store. Prefer Terminal set/remove.",
-    inputSchema: {
-      current_passphrase: passphraseSchema.optional().describe("Unused."),
-      new_passphrase: z
-        .string()
-        .min(8)
-        .describe("Unused — passphrases are not part of the product path."),
-      ttl_hours: z.number().min(0.1).max(168).optional(),
-    },
-  },
-  async ({ current_passphrase, new_passphrase, ttl_hours }) => {
-    try {
-      return await vaultChangePassphraseTool(dataDir, {
-        current_passphrase,
-        new_passphrase,
-        ttl_hours,
-      });
     } catch (err) {
       return errorResult(err);
     }
@@ -406,23 +301,8 @@ function errorResult(err: unknown) {
       "Reload the Cursor window.",
       "Run /setup-password-space again.",
     ];
-  } else if (err instanceof PassphraseRequiredError) {
-    payload.code = err.code;
-    payload.host_limitation = err.host_limitation;
-    payload.recommended_path = err.recommended_path;
-    payload.copy_paste_command = bundledCliCommand("setup");
-    payload.copy_paste_commands = CLI_SETUP_COMMANDS;
-    payload.howToFix =
-      "Passphrases are not used. Run the plugin-bundled Terminal CLI (setup then set). No unlock needed.";
-    payload.what_to_do = [
-      `Recommended: ${bundledCliCommand("setup")}`,
-      `Then: ${bundledCliCommand("set")}`,
-      "Vault Manager is optional status UI only — prefer Terminal for add/remove.",
-    ];
-    payload.never = ["Paste secret values into chat", "Edit mcp.json"];
   } else if (/not set up|not initialized/i.test(message)) {
     payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_setup}\` or /setup-password-space and follow primary_action (Terminal-first; no clone).`;
-    payload.host_limitation = HOST_LIMITATION;
     payload.recommended_path = "cli_setup";
     payload.copy_paste_command = bundledCliCommand("setup");
   }

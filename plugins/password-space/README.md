@@ -43,8 +43,6 @@ Default store folder: `~/.password-space`. Optional override: a real absolute `P
 | `inject_secret` | No — **preferred** for agents (by name) |
 | `vault_manager` | No — status-only; **do not** use for add |
 
-`vault_init` / `vault_unlock` / `vault_lock` may still appear for compatibility — they are **not** required.
-
 More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [plain-text store note](../../docs/onboarding.md). CLI details: [root README](../../README.md).
 
 MIT

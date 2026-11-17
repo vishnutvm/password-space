@@ -26,7 +26,7 @@ After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and re
 
 | Path | Role |
 | --- | --- |
-| `packages/vault` | Plain store, inject, redact (legacy crypto helpers may remain unused) |
+| `packages/vault` | Plain store, inject, redact |
 | `packages/cli` | Human CLI (also bundled to plugin `dist/cli.js`) |
 | `packages/mcp-server` | MCP tools for agents |
 | `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |

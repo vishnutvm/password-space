@@ -41,13 +41,10 @@ type StoreFile = {
  */
 export class VaultStore {
   readonly storePath: string;
-  /** @deprecated Prefer storePath — kept for MCP/CLI status fields. */
-  readonly dbPath: string;
   private data: StoreFile | null = null;
 
   constructor(storePath: string) {
     this.storePath = storePath;
-    this.dbPath = storePath;
     mkdirSync(dirname(storePath), { recursive: true });
     if (existsSync(storePath)) {
       this.data = this.readFile();
@@ -72,19 +69,6 @@ export class VaultStore {
     };
   }
 
-  /**
-   * Create an empty store. Passphrase is ignored (soft-compat with old MCP tools).
-   */
-  async init(_passphrase?: string): Promise<void> {
-    if (this.isInitialized()) {
-      throw new VaultError("Store already initialized", "ALREADY_INITIALIZED");
-    }
-    const now = new Date().toISOString();
-    this.data = { version: STORE_VERSION, createdAt: now, secrets: [] };
-    this.persist();
-    this.audit("init", null, null, "human", "plain-json store created");
-  }
-
   /** Ensure the store file exists (setup / first use). */
   ensure(): void {
     if (!this.isInitialized()) {
@@ -95,52 +79,6 @@ export class VaultStore {
     } else if (!this.data) {
       this.data = this.readFile();
     }
-  }
-
-  /** Always true for the plain store once initialized (no unlock gate). */
-  get isUnlocked(): boolean {
-    return this.isInitialized();
-  }
-
-  /**
-   * Soft-compat: no-op unlock. Returns an empty buffer (no vault key).
-   */
-  async unlock(_passphrase?: string): Promise<Buffer> {
-    if (!this.isInitialized()) {
-      throw new VaultError(
-        "Store not initialized. Run: password-space setup",
-        "NOT_INITIALIZED",
-      );
-    }
-    this.data = this.readFile();
-    this.audit("unlock", null, null, "human", "noop — plain store needs no unlock");
-    return Buffer.alloc(0);
-  }
-
-  /** Soft-compat: no vault key to restore. */
-  unlockWithKey(_vaultKey: Buffer): void {
-    if (!this.isInitialized()) {
-      throw new VaultError("Store not initialized", "NOT_INITIALIZED");
-    }
-    this.data = this.readFile();
-  }
-
-  /** Soft-compat: no-op (nothing to lock). */
-  lock(): void {
-    // intentionally empty
-  }
-
-  /**
-   * Soft-compat: passphrase change is not applicable.
-   */
-  async changePassphrase(
-    _currentPassphrase: string,
-    _nextPassphrase: string,
-  ): Promise<Buffer> {
-    throw new VaultError(
-      "Passphrases are not used. The store is local plain text — lock/unlock/change-passphrase are not needed.",
-      "DEPRECATED",
-    );
   }
 
   private requireReady(): StoreFile {

@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { vaultInitTool, vaultUnlockTool } from "./tools.js";
 import { withVaultStore } from "./with-store.js";
 
 const dirs: string[] = [];
@@ -21,36 +20,15 @@ function tempDir(): string {
 }
 
 describe("withVaultStore", () => {
-  it("awaits vault_init so store creation succeeds without unlock", async () => {
+  it("awaits async callbacks before closing the store", async () => {
     const dir = tempDir();
-
-    const initResult = await withVaultStore(dir, (store) =>
-      vaultInitTool(store, dir, {}),
-    );
-    const initParsed = JSON.parse(initResult.content[0]!.text) as {
-      ok: boolean;
-      initialized: boolean;
-      lock_unlock_needed: boolean;
-    };
-    expect(initParsed.ok).toBe(true);
-    expect(initParsed.initialized).toBe(true);
-    expect(initParsed.lock_unlock_needed).toBe(false);
-
-    const unlockResult = await vaultUnlockTool(dir, {});
-    const unlockParsed = JSON.parse(unlockResult.content[0]!.text) as {
-      ok: boolean;
-      unlocked: boolean;
-      deprecated: boolean;
-    };
-    expect(unlockParsed.ok).toBe(true);
-    expect(unlockParsed.unlocked).toBe(true);
-    expect(unlockParsed.deprecated).toBe(true);
-
-    const status = await withVaultStore(dir, (store) => {
-      expect(store.isInitialized()).toBe(true);
-      expect(store.isUnlocked).toBe(true);
-      return { ok: true as const };
+    await withVaultStore(dir, async (store) => {
+      await Promise.resolve();
+      store.ensure();
     });
-    expect(status.ok).toBe(true);
+    const status = await withVaultStore(dir, (store) => ({
+      initialized: store.isInitialized(),
+    }));
+    expect(status.initialized).toBe(true);
   });
 });

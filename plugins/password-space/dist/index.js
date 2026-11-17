@@ -18870,7 +18870,7 @@ var require_dist = __commonJS({
 });
 
 // packages/mcp-server/src/index.ts
-import { readFileSync as readFileSync4, existsSync as existsSync6 } from "node:fs";
+import { readFileSync as readFileSync3, existsSync as existsSync5 } from "node:fs";
 import { dirname as dirname3, join as join4 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
@@ -28781,9 +28781,6 @@ function N3(Z, $, J, X, V) {
   return Z.registerResource($, J, { mimeType: p, ...X }, V);
 }
 
-// packages/vault/dist/crypto.js
-var SCRYPT_N = 2 ** 15;
-
 // packages/vault/dist/paths.js
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -28815,9 +28812,6 @@ function auditLogPath(dataDir2) {
 function vaultDbPath(dataDir2) {
   return join(dataDir2, "vault.db");
 }
-function sessionPath(dataDir2) {
-  return join(dataDir2, "session");
-}
 function injectDir(dataDir2) {
   return join(dataDir2, "inject");
 }
@@ -28842,12 +28836,9 @@ import { randomUUID } from "node:crypto";
 var STORE_VERSION = 1;
 var VaultStore = class {
   storePath;
-  /** @deprecated Prefer storePath — kept for MCP/CLI status fields. */
-  dbPath;
   data = null;
   constructor(storePath) {
     this.storePath = storePath;
-    this.dbPath = storePath;
     mkdirSync(dirname(storePath), { recursive: true });
     if (existsSync2(storePath)) {
       this.data = this.readFile();
@@ -28868,18 +28859,6 @@ var VaultStore = class {
       storage: "plain-json"
     };
   }
-  /**
-   * Create an empty store. Passphrase is ignored (soft-compat with old MCP tools).
-   */
-  async init(_passphrase) {
-    if (this.isInitialized()) {
-      throw new VaultError("Store already initialized", "ALREADY_INITIALIZED");
-    }
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    this.data = { version: STORE_VERSION, createdAt: now, secrets: [] };
-    this.persist();
-    this.audit("init", null, null, "human", "plain-json store created");
-  }
   /** Ensure the store file exists (setup / first use). */
   ensure() {
     if (!this.isInitialized()) {
@@ -28890,37 +28869,6 @@ var VaultStore = class {
     } else if (!this.data) {
       this.data = this.readFile();
     }
-  }
-  /** Always true for the plain store once initialized (no unlock gate). */
-  get isUnlocked() {
-    return this.isInitialized();
-  }
-  /**
-   * Soft-compat: no-op unlock. Returns an empty buffer (no vault key).
-   */
-  async unlock(_passphrase) {
-    if (!this.isInitialized()) {
-      throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
-    }
-    this.data = this.readFile();
-    this.audit("unlock", null, null, "human", "noop \u2014 plain store needs no unlock");
-    return Buffer.alloc(0);
-  }
-  /** Soft-compat: no vault key to restore. */
-  unlockWithKey(_vaultKey) {
-    if (!this.isInitialized()) {
-      throw new VaultError("Store not initialized", "NOT_INITIALIZED");
-    }
-    this.data = this.readFile();
-  }
-  /** Soft-compat: no-op (nothing to lock). */
-  lock() {
-  }
-  /**
-   * Soft-compat: passphrase change is not applicable.
-   */
-  async changePassphrase(_currentPassphrase, _nextPassphrase) {
-    throw new VaultError("Passphrases are not used. The store is local plain text \u2014 lock/unlock/change-passphrase are not needed.", "DEPRECATED");
   }
   requireReady() {
     if (!this.isInitialized() || !this.data) {
@@ -29092,26 +29040,15 @@ var VaultStore = class {
   }
 };
 
-// packages/vault/dist/session.js
-import { chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
-var DEFAULT_TTL_MS = 8 * 60 * 60 * 1e3;
-var SESSION_TTL_1_DAY_MS = 24 * 60 * 60 * 1e3;
-var SESSION_TTL_1_WEEK_MS = 7 * 24 * 60 * 60 * 1e3;
-function clearSession(sessionFilePath) {
-  if (existsSync3(sessionFilePath)) {
-    unlinkSync(sessionFilePath);
-  }
-}
-
 // packages/vault/dist/inject.js
-import { chmodSync as chmodSync3, mkdirSync as mkdirSync3, writeFileSync as writeFileSync3, unlinkSync as unlinkSync2, existsSync as existsSync4, readdirSync, readFileSync as readFileSync3 } from "node:fs";
+import { chmodSync as chmodSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync3, readdirSync, readFileSync as readFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 import { randomBytes } from "node:crypto";
 var DEFAULT_INJECT_TTL_MS = 5 * 60 * 1e3;
 function writeInjectFile(dataDir2, opts) {
   clearExpiredInjectFiles(dataDir2);
   const dir = injectDir(dataDir2);
-  mkdirSync3(dir, { recursive: true });
+  mkdirSync2(dir, { recursive: true });
   const token = randomBytes(16).toString("hex");
   const envVar = opts.envVar ?? sanitizeEnvName(opts.secretName);
   const envFile = join2(dir, `${token}.env`);
@@ -29124,9 +29061,9 @@ function writeInjectFile(dataDir2, opts) {
     `${envVar}=${shellEscape(opts.value)}`,
     ""
   ].join("\n");
-  writeFileSync3(envFile, content, { mode: 384 });
+  writeFileSync2(envFile, content, { mode: 384 });
   try {
-    chmodSync3(envFile, 384);
+    chmodSync2(envFile, 384);
   } catch {
   }
   return {
@@ -29141,7 +29078,7 @@ function writeInjectFile(dataDir2, opts) {
 }
 function clearExpiredInjectFiles(dataDir2, now = Date.now()) {
   const dir = injectDir(dataDir2);
-  if (!existsSync4(dir))
+  if (!existsSync3(dir))
     return 0;
   let removed = 0;
   for (const name of readdirSync(dir)) {
@@ -29149,11 +29086,11 @@ function clearExpiredInjectFiles(dataDir2, now = Date.now()) {
       continue;
     const full = join2(dir, name);
     try {
-      const body = readFileSync3(full, "utf8");
+      const body = readFileSync2(full, "utf8");
       const match = /^# password-space inject — expires (.+)$/m.exec(body);
       const expiresMs = match ? Date.parse(match[1]) : NaN;
       if (Number.isFinite(expiresMs) && expiresMs <= now) {
-        unlinkSync2(full);
+        unlinkSync(full);
         removed++;
       }
     } catch {
@@ -29174,29 +29111,9 @@ function openVault(opts = {}) {
   const dataDir2 = opts.dataDir ?? defaultDataDir();
   return new VaultStore(secretsStorePath(dataDir2));
 }
-async function unlockVaultToSession(_passphrase, opts = {}) {
-  const dataDir2 = opts.dataDir ?? defaultDataDir();
-  clearExpiredInjectFiles(dataDir2);
-  const store = new VaultStore(secretsStorePath(dataDir2));
-  try {
-    if (!store.isInitialized()) {
-      throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
-    }
-    await store.unlock();
-    clearSession(sessionPath(dataDir2));
-    return { expiresAt: null, untilLock: true };
-  } finally {
-    store.close();
-  }
-}
-function lockVaultSession(opts = {}) {
-  const dataDir2 = opts.dataDir ?? defaultDataDir();
-  clearSession(sessionPath(dataDir2));
-  clearExpiredInjectFiles(dataDir2);
-}
 
 // packages/mcp-server/src/tools.ts
-import { existsSync as existsSync5 } from "node:fs";
+import { existsSync as existsSync4 } from "node:fs";
 import { dirname as dirname2, join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 function jsonResult(payload, opts) {
@@ -29207,32 +29124,27 @@ function jsonResult(payload, opts) {
     ...opts?.redact ? { _meta: { redact_in_transcript: true } } : {}
   };
 }
-var HOST_LIMITATION = "Lock/unlock/passphrase are not required. Name secrets in Terminal, then use inject_secret by name.";
 var BUNDLED_CLI_RELATIVE = "dist/cli.js";
 var BUNDLED_CLI_NODE = `node "\${CURSOR_PLUGIN_ROOT}/${BUNDLED_CLI_RELATIVE}"`;
 var CLI_SETUP_COMMANDS = {
   plugin_setup: `${BUNDLED_CLI_NODE} setup`,
-  /** @deprecated Unlock is a no-op for the plain store. */
-  plugin_unlock: `${BUNDLED_CLI_NODE} unlock`,
   plugin_set: `${BUNDLED_CLI_NODE} set`,
   from_clone_optional: "cd /path/to/password-space && pnpm install && pnpm build && pnpm password-space setup",
-  unlock_from_clone_optional: "cd /path/to/password-space && pnpm password-space unlock",
   set_from_clone_optional: "cd /path/to/password-space && pnpm password-space set",
   global_cli: "password-space setup",
-  unlock_global: "password-space unlock",
   set_global: "password-space set"
 };
 function resolveBundledCliPath() {
   try {
     const here = dirname2(fileURLToPath(import.meta.url));
     const sibling = join3(here, "cli.js");
-    if (existsSync5(sibling)) return sibling;
+    if (existsSync4(sibling)) return sibling;
   } catch {
   }
   const root = process.env.CURSOR_PLUGIN_ROOT?.trim();
   if (root && !root.includes("${")) {
     const fromEnv = join3(root, BUNDLED_CLI_RELATIVE);
-    if (existsSync5(fromEnv)) return fromEnv;
+    if (existsSync4(fromEnv)) return fromEnv;
   }
   return void 0;
 }
@@ -29245,17 +29157,6 @@ function bundledCliCommand(subcommand = "") {
   const sub = subcommand.trim();
   return sub ? `${base} ${sub}` : base;
 }
-var PassphraseRequiredError = class extends Error {
-  code = "passphrase_missing";
-  host_limitation = HOST_LIMITATION;
-  recommended_path = "cli_setup";
-  constructor() {
-    super(
-      `Passphrases are not used. Open Terminal and run \`${CLI_SETUP_COMMANDS.plugin_setup}\` then \`${CLI_SETUP_COMMANDS.plugin_set}\` \u2014 never paste secrets into chat.`
-    );
-    this.name = "PassphraseRequiredError";
-  }
-};
 var NodeVersionError = class extends Error {
   code = "node_too_old";
   found;
@@ -29284,12 +29185,6 @@ function checkPrerequisites(nodeVersion = process.version) {
     howToFix: nodeOk ? void 0 : `Install Node.js ${MIN_NODE_MAJOR} or newer from https://nodejs.org, then reload Cursor (MCP runs on the host Node).`
   };
 }
-function assertNodeVersion(nodeVersion = process.version) {
-  const check2 = checkPrerequisites(nodeVersion);
-  if (!check2.node_ok) {
-    throw new NodeVersionError(check2.node_version, MIN_NODE_MAJOR);
-  }
-}
 function onboardingProgress(initialized, _unlocked = true) {
   if (!initialized) {
     return {
@@ -29303,9 +29198,6 @@ function onboardingProgress(initialized, _unlocked = true) {
     headline: "Add a named secret",
     step_of: "Step 2 of 2 \xB7 Name once, use by name"
   };
-}
-function isPassphraseConfiguredInEnv() {
-  return Boolean(process.env.PASSWORD_SPACE_PASSPHRASE?.trim());
 }
 function resolveSetupState(opts) {
   if (!opts.prereqOk) return "fix_node";
@@ -29442,9 +29334,8 @@ function recoveryGuidance(opts) {
 function vaultOnboardTool(store, dataDir2) {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
-  const unlocked = store.isUnlocked || !initialized ? store.isUnlocked : true;
   const storePath = secretsStorePath(dataDir2);
-  const storeExists = existsSync5(storePath);
+  const storeExists = existsSync4(storePath);
   const legacyEncrypted = hasLegacyEncryptedVault(dataDir2);
   const setup_state = resolveSetupState({
     prereqOk: prereq.ok,
@@ -29474,10 +29365,9 @@ function vaultOnboardTool(store, dataDir2) {
     legacy_encrypted_vault: legacyEncrypted,
     legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir2) : null,
     initialized,
-    unlocked: initialized ? true : unlocked,
+    unlocked: initialized,
     session: true,
     prerequisites: prereq,
-    passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     checklist: steps,
@@ -29503,7 +29393,7 @@ function vaultStatusTool(store, dataDir2) {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
   const storePath = secretsStorePath(dataDir2);
-  const storeExists = existsSync5(storePath);
+  const storeExists = existsSync4(storePath);
   const legacyEncrypted = hasLegacyEncryptedVault(dataDir2);
   const setup_state = resolveSetupState({
     prereqOk: prereq.ok,
@@ -29535,7 +29425,6 @@ function vaultStatusTool(store, dataDir2) {
     session: true,
     secret_count: initialized ? store.listSecrets().length : 0,
     prerequisites: prereq,
-    passphrase_env_configured: isPassphraseConfiguredInEnv(),
     trust_line: TRUST_LINE,
     progress,
     headline: progress.headline,
@@ -29551,96 +29440,6 @@ function vaultStatusTool(store, dataDir2) {
     tip: !initialized ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} then set). Lock/unlock not needed.` : `Add secrets in Terminal: ${bundledCliCommand("set")}`,
     recommended_path: primary_action.recommended_path ?? null,
     copy_paste_command: primary_action.copy_paste_command
-  });
-}
-async function vaultInitTool(store, dataDir2, _args = {}) {
-  assertNodeVersion();
-  if (store.isInitialized()) {
-    return jsonResult({
-      ok: true,
-      code: "store_already_exists",
-      deprecated: true,
-      initialized: true,
-      unlocked: true,
-      data_dir: dataDir2,
-      store_path: secretsStorePath(dataDir2),
-      db_path: secretsStorePath(dataDir2),
-      note: "Store already exists. Lock/unlock/passphrase are not needed. Add secrets in Terminal.",
-      howToFix: `Add credentials with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
-      what_to_do: [`Run: ${bundledCliCommand("set")}`],
-      recommended_path: "cli_set",
-      primary_action: buildPrimaryAction(true, true, true, true)
-    });
-  }
-  await store.init();
-  const nextAction = buildPrimaryAction(true, true, true, true);
-  return jsonResult({
-    ok: true,
-    initialized: true,
-    unlocked: true,
-    deprecated: true,
-    data_dir: dataDir2,
-    store_path: secretsStorePath(dataDir2),
-    db_path: secretsStorePath(dataDir2),
-    setup_state: "ready",
-    storage: "plain-json",
-    lock_unlock_needed: false,
-    next: nextAction.do_this,
-    recommended_path: nextAction.recommended_path,
-    copy_paste_command: nextAction.copy_paste_command,
-    primary_action: nextAction,
-    note: "Plain store created. Prefer Terminal setup/set. Passphrase/unlock are not used."
-  });
-}
-async function vaultUnlockTool(dataDir2, _args = {}) {
-  assertNodeVersion();
-  try {
-    await unlockVaultToSession(_args.passphrase ?? "unused-passphrase-xx", {
-      dataDir: dataDir2
-    });
-  } catch {
-    return jsonResult({
-      ok: false,
-      unlocked: false,
-      deprecated: true,
-      code: "store_missing",
-      data_dir: dataDir2,
-      note: "Unlock is not needed for the plain store. Run Terminal setup first.",
-      copy_paste_command: bundledCliCommand("setup"),
-      recommended_path: "cli_setup"
-    });
-  }
-  return jsonResult({
-    ok: true,
-    unlocked: true,
-    deprecated: true,
-    data_dir: dataDir2,
-    expires_at: null,
-    until_lock: true,
-    lock_unlock_needed: false,
-    note: "Unlock is a no-op. The store is local plain text \u2014 agents can inject_secret by name without unlock."
-  });
-}
-function vaultLockTool(dataDir2) {
-  lockVaultSession({ dataDir: dataDir2 });
-  return jsonResult({
-    ok: true,
-    locked: false,
-    deprecated: true,
-    data_dir: dataDir2,
-    note: "Lock is a no-op. The plain store stays readable locally; there is no unlock session."
-  });
-}
-async function vaultChangePassphraseTool(dataDir2, _args) {
-  assertNodeVersion();
-  return jsonResult({
-    ok: false,
-    changed: false,
-    deprecated: true,
-    code: "passphrase_not_used",
-    data_dir: dataDir2,
-    error: "Passphrases are not used. The store is local plain text.",
-    note: "Add/remove secrets in Terminal. Lock/unlock/change-passphrase are not part of the product path."
   });
 }
 function vaultDeleteSecretTool(store, name) {
@@ -29800,7 +29599,7 @@ function assertReady(store) {
 
 // packages/mcp-server/src/with-store.ts
 async function withVaultStore(dataDir2, fn) {
-  const store = openVault({ dataDir: dataDir2, useSession: true });
+  const store = openVault({ dataDir: dataDir2 });
   try {
     return await fn(store);
   } finally {
@@ -29827,19 +29626,13 @@ function loadVaultManagerHtml() {
     join4(here, "../app/vault-manager.html")
   ];
   for (const path of candidates) {
-    if (!existsSync6(path)) continue;
-    const html = readFileSync4(path, "utf8");
+    if (!existsSync5(path)) continue;
+    const html = readFileSync3(path, "utf8");
     if (isBundledVaultManagerHtml(html)) return html;
   }
   return FALLBACK_VAULT_MANAGER_HTML;
 }
 var dataDir = defaultDataDir();
-var passphraseSchema = external_exports.string().min(8, "Passphrase must be at least 8 characters.").describe(
-  "Unused for the plain-text store (soft-compat). Prefer Terminal setup/set \u2014 never paste secrets into chat."
-);
-var optionalPassphraseShape = {
-  passphrase: passphraseSchema.optional()
-};
 var server = new McpServer({
   name: "password-space",
   version: "0.1.0"
@@ -29867,75 +29660,6 @@ server.registerTool(
   async () => {
     try {
       return await withVaultStore(dataDir, (store) => vaultStatusTool(store, dataDir));
-    } catch (err) {
-      return errorResult(err);
-    }
-  }
-);
-server.registerTool(
-  "vault_init",
-  {
-    title: "Create your store (optional)",
-    description: "Soft-compat: ensures the local plain-text store exists. Prefer Terminal setup/set. Passphrase is ignored. No unlock needed afterward.",
-    inputSchema: optionalPassphraseShape
-  },
-  async ({ passphrase }) => {
-    try {
-      return await withVaultStore(dataDir, (store) => vaultInitTool(store, dataDir, { passphrase }));
-    } catch (err) {
-      return errorResult(err);
-    }
-  }
-);
-server.registerTool(
-  "vault_unlock",
-  {
-    title: "Unlock (not needed)",
-    description: "Soft-compat no-op. The plain-text store does not use unlock sessions. Prefer Terminal set + inject_secret.",
-    inputSchema: {
-      ...optionalPassphraseShape,
-      ttl_hours: external_exports.number().min(0.1).max(168).optional().describe("Ignored \u2014 unlock is not used."),
-      until_lock: external_exports.boolean().optional().describe("Ignored \u2014 unlock is not used.")
-    }
-  },
-  async ({ passphrase, ttl_hours, until_lock }) => {
-    try {
-      return await vaultUnlockTool(dataDir, { passphrase, ttl_hours, until_lock });
-    } catch (err) {
-      return errorResult(err);
-    }
-  }
-);
-server.tool(
-  "vault_lock",
-  "Soft-compat no-op \u2014 the plain-text store does not use unlock sessions.",
-  {},
-  async () => {
-    try {
-      return vaultLockTool(dataDir);
-    } catch (err) {
-      return errorResult(err);
-    }
-  }
-);
-server.registerTool(
-  "vault_change_passphrase",
-  {
-    title: "Change passphrase (not used)",
-    description: "Soft-compat: passphrases are not used for the plain-text store. Prefer Terminal set/remove.",
-    inputSchema: {
-      current_passphrase: passphraseSchema.optional().describe("Unused."),
-      new_passphrase: external_exports.string().min(8).describe("Unused \u2014 passphrases are not part of the product path."),
-      ttl_hours: external_exports.number().min(0.1).max(168).optional()
-    }
-  },
-  async ({ current_passphrase, new_passphrase, ttl_hours }) => {
-    try {
-      return await vaultChangePassphraseTool(dataDir, {
-        current_passphrase,
-        new_passphrase,
-        ttl_hours
-      });
     } catch (err) {
       return errorResult(err);
     }
@@ -30108,22 +29832,8 @@ function errorResult(err) {
       "Reload the Cursor window.",
       "Run /setup-password-space again."
     ];
-  } else if (err instanceof PassphraseRequiredError) {
-    payload.code = err.code;
-    payload.host_limitation = err.host_limitation;
-    payload.recommended_path = err.recommended_path;
-    payload.copy_paste_command = bundledCliCommand("setup");
-    payload.copy_paste_commands = CLI_SETUP_COMMANDS;
-    payload.howToFix = "Passphrases are not used. Run the plugin-bundled Terminal CLI (setup then set). No unlock needed.";
-    payload.what_to_do = [
-      `Recommended: ${bundledCliCommand("setup")}`,
-      `Then: ${bundledCliCommand("set")}`,
-      "Vault Manager is optional status UI only \u2014 prefer Terminal for add/remove."
-    ];
-    payload.never = ["Paste secret values into chat", "Edit mcp.json"];
   } else if (/not set up|not initialized/i.test(message)) {
     payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_setup}\` or /setup-password-space and follow primary_action (Terminal-first; no clone).`;
-    payload.host_limitation = HOST_LIMITATION;
     payload.recommended_path = "cli_setup";
     payload.copy_paste_command = bundledCliCommand("setup");
   }
