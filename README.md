@@ -173,7 +173,7 @@ If you would rather not use Terminal, give the key to your agent one time, for e
 the value goes to your OS keychain, and from then on every session finds it with `list_secrets`
 and uses it by name through `run -s GITHUB_TOKEN -- <command>`. You don't paste it again.
 
-- The value is never returned by any tool result except the last-resort `resolve_secret`, and errors are scrubbed of it.
+- The value is never returned by any tool result except `resolve_secret`, which is off unless you set `PASSWORD_SPACE_ENABLE_RESOLVE=1`, and errors are scrubbed of it.
 - An existing name is never replaced unless the agent passes `overwrite: true` (for a rotated key).
 - `remove_secret` deletes a secret by name when you ask the agent to forget it.
 - Every add, update and remove is written to `~/.password-space/audit.jsonl` with the name and actor (`mcp-agent`), never the value.
