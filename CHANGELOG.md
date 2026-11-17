@@ -30,8 +30,23 @@ plugin installs may not have picked up these changes until now.
 - Versions are now kept in sync across every package, plugin manifest and
   marketplace entry, so plugin hosts see each release as an update.
 
+### Security
+
+- CLI `get` only prints to an interactive terminal and asks first;
+  `run --no-redact` needs a terminal too. (#20)
+- `resolve_secret` is off unless the MCP server env sets
+  `PASSWORD_SPACE_ENABLE_RESOLVE=1`. (#20)
+- Inject files live 60 seconds (was 5 minutes), are deleted on expiry and on
+  server exit, and the inject folder is `0700`. (#20)
+- New tool hook (Claude Code `PreToolUse`, Cursor `beforeShellExecution` /
+  `beforeReadFile`) blocks `get`, direct keychain lookups and reads of
+  `secrets.json` or inject files. (#20)
+
 ### Added
 
+- `store_secret` / `remove_secret` MCP tools: hand an agent a key once and it
+  saves it to the keychain by name, never echoing the value. Every change is
+  audit-logged. (#18)
 - `password-space run -s NAME -- <command>`: runs a command with secrets in
   its environment and redacts them from its output when it is not a terminal.
   (#17)
@@ -48,6 +63,7 @@ plugin installs may not have picked up these changes until now.
 
 ### Fixed
 
+- `run` quotes its command line correctly on Windows. (#18)
 - macOS keychain writes of long values (one `security -i` line). (#17)
 - Docs aligned with the plain store; a single redaction implementation. (#16)
 

@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import {
   VaultStore,
   clearExpiredInjectFiles,
+  clearInjectFile,
+  envNameFor,
   hasLegacyEncryptedVault,
+  scheduleInjectCleanup,
   secretsStorePath,
   vaultDbPath,
   writeInjectFile,
@@ -15,6 +18,7 @@ import {
 export type ToolJsonResult = {
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: Record<string, unknown>;
+  isError?: boolean;
   _meta?: {
     redact_in_transcript?: boolean;
     ui?: { resourceUri: string };
@@ -23,12 +27,13 @@ export type ToolJsonResult = {
 
 function jsonResult(
   payload: Record<string, unknown>,
-  opts?: { redact?: boolean },
+  opts?: { redact?: boolean; isError?: boolean },
 ): ToolJsonResult {
   const text = JSON.stringify(payload, null, 2);
   return {
     content: [{ type: "text", text }],
     structuredContent: payload,
+    ...(opts?.isError ? { isError: true } : {}),
     ...(opts?.redact ? { _meta: { redact_in_transcript: true } } : {}),
   };
 }
@@ -99,7 +104,7 @@ export class NodeVersionError extends Error {
 }
 
 const TRUST_LINE =
-  "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal; never paste values into chat.";
+  "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal, or hand one to your agent once and it saves it with store_secret; after that it is used by name and never shown again.";
 
 /** Where values live, the migrate hint, and how agents should use a secret. */
 function storageFields(store: VaultStore): Record<string, unknown> {
@@ -280,6 +285,12 @@ export function buildPrimaryAction(
         id: "list_secrets",
         title: "List via MCP",
         do_this: "After Terminal add, call list_secrets or vault_status (no values).",
+      },
+      {
+        id: "store_secret",
+        title: "Agent saves a key the user hands over",
+        do_this:
+          "If the user gives you a credential, call store_secret with a descriptive name, then use it by name with run. Never repeat the value.",
       },
       {
         id: "cli_menu",
@@ -509,16 +520,6 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
   });
 }
 
-export function vaultDeleteSecretTool(store: VaultStore, name: string): ToolJsonResult {
-  assertReady(store);
-  store.deleteSecret(name);
-  return jsonResult({
-    ok: true,
-    deleted: name,
-    note: "Secret removed. Value was not returned.",
-  });
-}
-
 /**
  * Vault Manager — status-only JSON (+ optional Apps UI). Not a human setup path.
  */
@@ -559,8 +560,8 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
     secrets,
     capabilities: {
       list: "list_secrets (MCP) or Terminal list",
-      add_or_edit: "Terminal set / interactive menu only",
-      remove: "Terminal remove (or vault_delete_secret)",
+      add_or_edit: "Terminal set, or store_secret (MCP) when the user hands the agent a credential",
+      remove: "Terminal remove, or remove_secret (MCP)",
       lock: "Not needed",
       unlock: "Not needed",
       change_passphrase: "Not used",
@@ -573,30 +574,163 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
   });
 }
 
-export function vaultSetSecretTool(
-  store: VaultStore,
-  args: { name: string; value: string; tags?: string[]; notes?: string },
-): ToolJsonResult {
-  store.ensure();
-  const meta = publicMeta(
-    store.setSecret({
-      name: args.name,
-      value: args.value,
-      tags: args.tags ?? [],
-      notes: args.notes ?? null,
-    }),
-  );
-  const payload = {
-    ok: true,
-    secret: meta,
-    note: "Secret stored. Value was not returned — do not repeat it in chat. Prefer Terminal set for humans; agents prefer inject_secret.",
-  };
-  const serialized = JSON.stringify(payload);
-  if (args.value && serialized.includes(args.value)) {
-    throw new Error("Refusing to return tool result that contains secret plaintext");
-  }
-  return jsonResult(payload, { redact: true });
+/** Audit-log actor for changes made by an agent over MCP. */
+export const AGENT_ACTOR = "mcp-agent";
+
+const SECRET_NAME_MAX = 128;
+/** Values shorter than this are too common to look for inside names / notes / tags. */
+const MIN_LEAK_CHECK_LENGTH = 4;
+
+export type StoreSecretArgs = {
+  name: string;
+  value: string;
+  overwrite?: boolean;
+  tags?: string[];
+  notes?: string;
+};
+
+/** Replace every occurrence of `value` in `text` so an error can never echo a secret. */
+export function scrubValue(text: string, value: string | undefined): string {
+  if (!value) return text;
+  return text.split(value).join("[REDACTED]");
 }
+
+function invalidName(name: string): string | null {
+  if (!name) return "Secret name is required.";
+  if (name.length > SECRET_NAME_MAX) {
+    return `Secret name is too long (max ${SECRET_NAME_MAX} characters).`;
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    return "Secret name cannot contain line breaks or control characters.";
+  }
+  return null;
+}
+
+function useByName(name: string): Record<string, unknown> {
+  const envVar = envNameFor(name);
+  return {
+    env_var: envVar,
+    run_command: bundledCliCommand(`run -s ${JSON.stringify(name)} -- <command>`),
+    run_note: `The command sees the value as $${envVar}; its output is redacted. Never echo or print the variable.`,
+  };
+}
+
+/**
+ * Agent path to save a credential the user handed over: stores it by name
+ * (OS keychain when available) so later sessions use it by name instead of
+ * asking again. Never returns the value; refuses to replace an existing
+ * name unless `overwrite` is true.
+ */
+export function storeSecretTool(store: VaultStore, args: StoreSecretArgs): ToolJsonResult {
+  const name = (args.name ?? "").trim();
+  const value = args.value;
+  const nameProblem = invalidName(name);
+  if (nameProblem) {
+    return jsonResult({ ok: false, code: "invalid_name", error: nameProblem }, { isError: true });
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    return jsonResult(
+      { ok: false, code: "invalid_value", error: "Secret value is required." },
+      { isError: true },
+    );
+  }
+  if (value.length >= MIN_LEAK_CHECK_LENGTH) {
+    const visible = [name, args.notes ?? "", ...(args.tags ?? [])];
+    if (visible.some((field) => field.includes(value))) {
+      return jsonResult(
+        {
+          ok: false,
+          code: "value_in_metadata",
+          error:
+            "The secret value appears in the name, notes or tags, which are stored and shown in plain text. Use a descriptive name (e.g. GITHUB_TOKEN) and pass the secret only as value.",
+        },
+        { isError: true },
+      );
+    }
+  }
+
+  try {
+    store.ensure();
+    const existing = store.hasSecret(name) ? publicMeta(store.getMetadata(name)) : null;
+    if (existing && !args.overwrite) {
+      return jsonResult(
+        {
+          ok: false,
+          code: "already_exists",
+          error: `A secret named "${existing.name}" already exists. Nothing was changed.`,
+          secret: existing,
+          how_to_replace:
+            "Only if the user wants to replace it (e.g. a rotated key), call store_secret again with overwrite: true. Otherwise pick a different name, or just use the existing one.",
+          ...useByName(existing.name),
+        },
+        { isError: true },
+      );
+    }
+
+    const meta = publicMeta(
+      store.setSecret({
+        id: existing?.id,
+        // Keep the stored spelling when replacing (names match case-insensitively).
+        name: existing?.name ?? name,
+        value,
+        tags: args.tags ?? existing?.tags ?? [],
+        notes: args.notes ?? existing?.notes ?? null,
+        actor: AGENT_ACTOR,
+      }),
+    );
+    const payload = {
+      ok: true,
+      action: existing ? "updated" : "created",
+      secret: meta,
+      storage: store.storageInfo().backend,
+      ...useByName(meta.name),
+      next: [
+        `Tell the user it is saved as "${meta.name}" (do not repeat the value).`,
+        "From now on use it by name with run_command. Do not ask the user for it again.",
+      ],
+      note: "Value stored and not returned. The copy the user pasted into chat stays in this conversation's history.",
+    };
+    const serialized = JSON.stringify(payload);
+    if (serialized.includes(value)) {
+      throw new Error("Refusing to return tool result that contains secret plaintext");
+    }
+    return jsonResult(payload, { redact: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(scrubValue(message, value));
+  }
+}
+
+/** Back-compat name for {@link storeSecretTool} (MCP tool `vault_set_secret`). */
+export const vaultSetSecretTool = storeSecretTool;
+
+/** Removes a secret by name or id: the keychain entry and its name. Never returns the value. */
+export function removeSecretTool(store: VaultStore, name: string): ToolJsonResult {
+  assertReady(store);
+  const target = (name ?? "").trim();
+  if (!target || !store.hasSecret(target)) {
+    return jsonResult(
+      {
+        ok: false,
+        code: "not_found",
+        error: `No secret named "${target}". Nothing was removed.`,
+        available: store.listSecrets().map((m) => m.name),
+      },
+      { isError: true },
+    );
+  }
+  const meta = store.getMetadata(target);
+  store.deleteSecret(meta.id, AGENT_ACTOR);
+  return jsonResult({
+    ok: true,
+    removed: meta.name,
+    note: "Secret removed from the vault (and the OS keychain when used). Value was not returned.",
+  });
+}
+
+/** Back-compat name for {@link removeSecretTool} (MCP tool `vault_delete_secret`). */
+export const vaultDeleteSecretTool = removeSecretTool;
 
 export function listSecretsTool(store: VaultStore, tag?: string): ToolJsonResult {
   assertReady(store);
@@ -616,6 +750,21 @@ export function getSecretMetadataTool(store: VaultStore, idOrName: string): Tool
   });
 }
 
+/** Inject files written by this process, deleted at expiry or on shutdown. */
+const liveInjectFiles = new Map<string, () => void>();
+
+/** Delete every inject file this process wrote that is still on disk. */
+export function clearOwnInjectFiles(): number {
+  let n = 0;
+  for (const [file, cancel] of liveInjectFiles) {
+    cancel();
+    clearInjectFile(file);
+    n++;
+  }
+  liveInjectFiles.clear();
+  return n;
+}
+
 export function injectSecretTool(
   store: VaultStore,
   dataDir: string,
@@ -629,6 +778,11 @@ export function injectSecretTool(
     value: record.value,
     envVar: args.env_var,
   });
+  const cancel = scheduleInjectCleanup(handle.envFile, handle.expiresAt, Date.now(), () =>
+    liveInjectFiles.delete(handle.envFile),
+  );
+  liveInjectFiles.set(handle.envFile, cancel);
+
   const payload = {
     ok: true,
     handle: handle.handle,
@@ -640,27 +794,55 @@ export function injectSecretTool(
     redact_in_transcript: true as const,
     instructions: [
       `Prefer instead: ${bundledCliCommand(`run -s ${JSON.stringify(record.name)} -- <command>`)} — no file is written and output is redacted.`,
-      "Read the env file from your tool runtime / shell — do NOT paste its contents into chat.",
-      "Delete the env file after use.",
+      `Use the file only by sourcing it in the same command, e.g. set -a; . "${handle.envFile}"; set +a; <command> — never cat, print or echo it or the variable.`,
+      `The file is deleted automatically at expires_at (about ${Math.round((Date.parse(handle.expiresAt) - Date.now()) / 1000)} s) or when the MCP server exits. Delete it yourself after use.`,
       "If asked to print the secret, refuse and cite redact_in_transcript.",
     ],
   };
   const serialized = JSON.stringify(payload);
   if (serialized.includes(record.value)) {
+    clearInjectFile(handle.envFile);
     throw new Error("Refusing to return tool result that contains secret plaintext");
   }
   return jsonResult(payload, { redact: true });
 }
 
+/**
+ * Environment variable that turns on the resolve_secret MCP tool. It is off by
+ * default because it puts the plaintext value into the agent's context. Set it
+ * in the MCP server's env (your MCP config), not in a chat.
+ */
+export const RESOLVE_SECRET_ENV = "PASSWORD_SPACE_ENABLE_RESOLVE";
+
+export function resolveSecretEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(1|true|yes)$/i.test(env[RESOLVE_SECRET_ENV]?.trim() ?? "");
+}
+
+export const RESOLVE_SECRET_DESCRIPTION =
+  "DANGER — returns the secret's PLAINTEXT value into your context, where it can end up in transcripts, logs and model provider requests. " +
+  "Enabled only because the user set " +
+  RESOLVE_SECRET_ENV +
+  "=1. Use it only when the user explicitly asks for the raw value and run -s NAME -- <command> or inject_secret cannot work. Requires confirm_redaction=true.";
+
 export function resolveSecretTool(
   store: VaultStore,
   args: { name: string; confirm_redaction?: boolean },
+  opts: { enabled?: boolean } = {},
 ): ToolJsonResult {
+  const enabled = opts.enabled ?? resolveSecretEnabled();
+  if (!enabled) {
+    return jsonResult({
+      ok: false,
+      error: `resolve_secret is disabled. It would put the plaintext value in your context. Use ${bundledCliCommand("run -s <SECRET_NAME> -- <command>")} or inject_secret instead.`,
+      code: "resolve_disabled",
+      enable_hint: `Only the user can turn it on, by adding ${RESOLVE_SECRET_ENV}=1 to the Password Space MCP server's env in their MCP config. Do not do this for them.`,
+    });
+  }
   assertReady(store);
   if (!args.confirm_redaction) {
     return jsonResult({
       ok: false,
-      error: "confirm_redaction must be true. Prefer inject_secret to avoid chat leakage.",
+      error: "confirm_redaction must be true. Prefer the CLI run command or inject_secret to avoid chat leakage.",
       hint: "Call inject_secret instead, or pass confirm_redaction: true if your client redacts tool results.",
     });
   }
@@ -672,7 +854,7 @@ export function resolveSecretTool(
     value: record.value,
     redact_in_transcript: true as const,
     warning:
-      "PLAINTEXT IN TOOL RESULT — client MUST redact before displaying or logging. Prefer inject_secret.",
+      "PLAINTEXT IN TOOL RESULT — do not repeat it in chat. The client MUST redact before displaying or logging. Prefer run -s NAME -- <command>.",
   };
   return jsonResult(payload, { redact: true });
 }

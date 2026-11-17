@@ -1,5 +1,5 @@
 {
-  "description": "Password Space: setup hint at session start; block prompts that contain a known stored secret.",
+  "description": "Password Space: setup hint at session start; block prompts that contain a known stored secret; block agent tool calls that read secret values directly.",
   "hooks": {
     "SessionStart": [
       {
@@ -19,6 +19,18 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/prompt-guard.mjs\" --format claude",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/shell-guard.mjs\" --format claude",
             "timeout": 10
           }
         ]
