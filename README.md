@@ -48,6 +48,7 @@ Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/archi
 | --- | --- |
 | Node.js | **≥ 20** — required to run the bundled MCP |
 | Cursor plugin | Cursor with marketplace / MCP support |
+| Claude Code plugin | Claude Code with plugin support — see [docs/claude-code.md](./docs/claude-code.md) |
 | Package manager | **pnpm** 9.x — **optional**; only for developing this repo |
 | OS | Developed and verified on **macOS**; Linux/Windows best-effort |
 
@@ -78,6 +79,15 @@ Pass **secret name + value** in **Terminal** — **never** in chat. MCP tools ha
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
 Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/` (ships `dist/index.js` + `dist/cli.js`).
+
+## Quickstart (Claude Code)
+
+```text
+/plugin marketplace add vishnutvm/password-space
+/plugin install password-space@password-space-marketplace
+```
+
+Restart Claude Code, then run `/password-space:setup-password-space`. Hooks, what differs from Cursor, and manual setup: **[docs/claude-code.md](./docs/claude-code.md)**.
 
 ## CLI (setup / add / remove — primary path)
 
@@ -232,6 +242,6 @@ pnpm install && pnpm build && pnpm test
 | `packages/vault` | Plain store, inject, redact |
 | `packages/cli` | Human Terminal CLI |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
-| `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |
+| `plugins/password-space` | Cursor and Claude Code plugin (bundled MCP + CLI + skill + hooks + logo) |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
