@@ -28,11 +28,12 @@ import {
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
+  removeSecretTool,
   resolveSecretTool,
-  vaultDeleteSecretTool,
+  scrubValue,
+  storeSecretTool,
   vaultManagerTool,
   vaultOnboardTool,
-  vaultSetSecretTool,
   vaultStatusTool,
 } from "./tools.js";
 import { withVaultStore } from "./with-store.js";
@@ -107,24 +108,6 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "vault_delete_secret",
-  {
-    title: "Remove a credential",
-    description: "Deletes a saved credential by name. Never returns the secret value.",
-    inputSchema: {
-      name: z.string().min(1).describe("Secret name or id to delete"),
-    },
-  },
-  async ({ name }) => {
-    try {
-      return await withVaultStore(dataDir, (store) => vaultDeleteSecretTool(store, name));
-    } catch (err) {
-      return errorResult(err);
-    }
-  },
-);
-
 registerAppTool(
   server,
   "vault_manager",
@@ -181,44 +164,93 @@ registerAppResource(
   },
 );
 
+const STORE_SECRET_DESCRIPTION =
+  "Save a credential (API key, token, password) the user gave you, under a name, so you and later sessions can use it by name instead of asking again. " +
+  "Call it as soon as the user hands you a secret, then use it with the CLI run command (returned as run_command). " +
+  "The value goes to the OS keychain and is never returned. An existing name is not replaced unless overwrite is true. Never repeat the value in chat.";
+
+const storeSecretSchema = {
+  name: z
+    .string()
+    .min(1)
+    .max(128)
+    .describe("Descriptive name, e.g. GITHUB_TOKEN or OPENAI_API_KEY. Never the secret itself."),
+  value: z.string().min(1).describe("The secret value. Stored in the keychain; never echoed back."),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe("Set true only to replace an existing secret of the same name (e.g. a rotated key). Default false."),
+  tags: z
+    .array(z.string())
+    .optional()
+    .describe('Optional labels (e.g. ["github"]). Plain text, not secret.'),
+  notes: z.string().optional().describe("Optional reminder, e.g. what the key is for. Plain text, not secret."),
+};
+
+const storeSecretHandler = async (args: {
+  name: string;
+  value: string;
+  overwrite?: boolean;
+  tags?: string[];
+  notes?: string;
+}) => {
+  try {
+    return await withVaultStore(dataDir, (store) => storeSecretTool(store, args));
+  } catch (err) {
+    return errorResult(err, args.value);
+  }
+};
+
+server.registerTool(
+  "store_secret",
+  { title: "Save a secret to the vault", description: STORE_SECRET_DESCRIPTION, inputSchema: storeSecretSchema },
+  storeSecretHandler,
+);
+
 server.registerTool(
   "vault_set_secret",
   {
-    title: "Save a password or API token",
-    description:
-      "Stores a named credential (value goes to the OS keychain). Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
-    inputSchema: {
-      name: z
-        .string()
-        .min(1)
-        .describe("Short label for this credential (e.g. GITHUB_TOKEN, OpenAI API key)."),
-      value: z
-        .string()
-        .min(1)
-        .describe(
-          "The secret itself (token, password, API key). Enter in the approval form only — never in chat.",
-        ),
-      tags: z
-        .array(z.string())
-        .optional()
-        .describe('Optional labels for filtering (e.g. ["api", "github"]).'),
-      notes: z.string().optional().describe("Optional reminder text (not secret)."),
-    },
+    title: "Save a secret (alias of store_secret)",
+    description: `Same as store_secret. ${STORE_SECRET_DESCRIPTION}`,
+    inputSchema: storeSecretSchema,
   },
-  async ({ name, value, tags, notes }) => {
-    try {
-      return await withVaultStore(dataDir, (store) =>
-        vaultSetSecretTool(store, { name, value, tags, notes }),
-      );
-    } catch (err) {
-      return errorResult(err);
-    }
+  storeSecretHandler,
+);
+
+const REMOVE_SECRET_DESCRIPTION =
+  "Permanently delete a saved secret by name (its keychain value and its name). Only when the user asks to remove or forget it. Never returns the value.";
+
+const removeSecretSchema = {
+  name: z.string().min(1).describe("Name (or id) of the secret to delete, as shown by list_secrets."),
+};
+
+const removeSecretHandler = async ({ name }: { name: string }) => {
+  try {
+    return await withVaultStore(dataDir, (store) => removeSecretTool(store, name));
+  } catch (err) {
+    return errorResult(err);
+  }
+};
+
+server.registerTool(
+  "remove_secret",
+  { title: "Delete a secret from the vault", description: REMOVE_SECRET_DESCRIPTION, inputSchema: removeSecretSchema },
+  removeSecretHandler,
+);
+
+server.registerTool(
+  "vault_delete_secret",
+  {
+    title: "Delete a secret (alias of remove_secret)",
+    description: `Same as remove_secret. ${REMOVE_SECRET_DESCRIPTION}`,
+    inputSchema: removeSecretSchema,
   },
+  removeSecretHandler,
 );
 
 server.tool(
   "list_secrets",
-  "List saved credential names (no values). Use before inject_secret.",
+  "List saved credential names (no values). Check this first whenever a task needs an API key, token or password: if it is here, use it by name and do not ask the user for it again.",
   {
     tag: z.string().optional().describe("Optional tag filter"),
   },
@@ -286,8 +318,9 @@ server.tool(
   },
 );
 
-function errorResult(err: unknown) {
-  const message = err instanceof Error ? err.message : String(err);
+function errorResult(err: unknown, secretValue?: string) {
+  // Never let an error message carry a value an agent just tried to store.
+  const message = scrubValue(err instanceof Error ? err.message : String(err), secretValue);
   const payload: Record<string, unknown> = { ok: false, error: message };
 
   if (err instanceof NodeVersionError) {

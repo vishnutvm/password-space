@@ -1,10 +1,21 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryKeychain, VaultStore, openVault, secretsStorePath, vaultDbPath } from "@password-space/vault";
 import {
+  MemoryKeychain,
+  VaultStore,
+  auditLogPath,
+  openVault,
+  secretsStorePath,
+  vaultDbPath,
+} from "@password-space/vault";
+import {
+  AGENT_ACTOR,
   assertNoPlaintext,
+  removeSecretTool,
+  scrubValue,
+  storeSecretTool,
   checkPrerequisites,
   BUNDLED_CLI_NODE,
   CLI_SETUP_COMMANDS,
@@ -384,5 +395,198 @@ describe("storage reporting", () => {
     assertNoPlaintext(result, value);
     expect(result.content[0]!.text).toMatch(/run -s \\"DEMO_KEY\\" -- <command>/);
     store.close();
+  });
+});
+
+describe("agent-managed secrets (store_secret / remove_secret)", () => {
+  const VALUE = "ghp_agentHandedThisOver_1234567890";
+
+  function keychainStore(): { dir: string; store: VaultStore; kc: MemoryKeychain } {
+    const dir = tempDir();
+    const kc = new MemoryKeychain();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: kc });
+    return { dir, store, kc };
+  }
+
+  function parse(result: { content: Array<{ text: string }> }): Record<string, any> {
+    return JSON.parse(result.content[0]!.text) as Record<string, any>;
+  }
+
+  function auditText(dir: string): string {
+    const path = auditLogPath(dir);
+    return existsSync(path) ? readFileSync(path, "utf8") : "";
+  }
+
+  it("stores a new secret (creating the store), returns how to use it by name, never the value", () => {
+    const { dir, store, kc } = keychainStore();
+    expect(store.isInitialized()).toBe(false);
+    const result = storeSecretTool(store, { name: "GITHUB_TOKEN", value: VALUE, notes: "repo access" });
+    assertNoPlaintext(result, VALUE);
+    expect(result.isError).toBeUndefined();
+    expect(result._meta?.redact_in_transcript).toBe(true);
+    const p = parse(result);
+    expect(p.ok).toBe(true);
+    expect(p.action).toBe("created");
+    expect(p.secret.name).toBe("GITHUB_TOKEN");
+    expect(p.secret.notes).toBe("repo access");
+    expect(p.storage).toBe("keychain");
+    expect(p.env_var).toBe("GITHUB_TOKEN");
+    expect(p.run_command).toMatch(/run -s "GITHUB_TOKEN" -- <command>/);
+
+    // Value is in the keychain, not in secrets.json; usable by name.
+    expect([...kc.items.values()]).toContain(VALUE);
+    expect(readFileSync(secretsStorePath(dir), "utf8")).not.toContain(VALUE);
+    expect(store.getSecret("GITHUB_TOKEN").value).toBe(VALUE);
+    store.close();
+  });
+
+  it("audit-logs adds and removes by name with the agent actor, never the value", () => {
+    const { dir, store } = keychainStore();
+    storeSecretTool(store, { name: "OPENAI_API_KEY", value: VALUE });
+    storeSecretTool(store, { name: "OPENAI_API_KEY", value: `${VALUE}-rotated`, overwrite: true });
+    removeSecretTool(store, "OPENAI_API_KEY");
+    const log = auditText(dir);
+    expect(log).not.toContain(VALUE);
+    const events = log
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { action: string; secretName: string; actor: string })
+      .filter((e) => e.secretName === "OPENAI_API_KEY");
+    expect(events.map((e) => [e.action, e.actor])).toEqual([
+      ["create", AGENT_ACTOR],
+      ["update", AGENT_ACTOR],
+      ["delete", AGENT_ACTOR],
+    ]);
+    store.close();
+  });
+
+  it("refuses to replace an existing name without overwrite", () => {
+    const { store } = keychainStore();
+    storeSecretTool(store, { name: "GITHUB_TOKEN", value: VALUE });
+    const other = "ghp_aDifferentValue_0987654321";
+    const result = storeSecretTool(store, { name: "github_token", value: other });
+    assertNoPlaintext(result, VALUE);
+    assertNoPlaintext(result, other);
+    expect(result.isError).toBe(true);
+    const p = parse(result);
+    expect(p.ok).toBe(false);
+    expect(p.code).toBe("already_exists");
+    expect(p.how_to_replace).toMatch(/overwrite: true/);
+    expect(p.run_command).toMatch(/GITHUB_TOKEN/);
+    expect(store.getSecret("GITHUB_TOKEN").value).toBe(VALUE);
+    store.close();
+  });
+
+  it("replaces with overwrite: true, keeping the stored name, id, tags and notes", () => {
+    const { store } = keychainStore();
+    const first = parse(storeSecretTool(store, { name: "GITHUB_TOKEN", value: VALUE, tags: ["git"], notes: "ci" }));
+    const rotated = "ghp_rotated_value_1111111111";
+    const result = storeSecretTool(store, { name: "github_token", value: rotated, overwrite: true });
+    assertNoPlaintext(result, rotated);
+    const p = parse(result);
+    expect(p.ok).toBe(true);
+    expect(p.action).toBe("updated");
+    expect(p.secret.name).toBe("GITHUB_TOKEN");
+    expect(p.secret.id).toBe(first.secret.id);
+    expect(p.secret.tags).toEqual(["git"]);
+    expect(p.secret.notes).toBe("ci");
+    expect(store.listSecrets()).toHaveLength(1);
+    expect(store.getSecret("GITHUB_TOKEN").value).toBe(rotated);
+    store.close();
+  });
+
+  it("rejects a value that would end up in plain-text name, notes or tags", () => {
+    const { store } = keychainStore();
+    for (const args of [
+      { name: `key ${VALUE}`, value: VALUE },
+      { name: "K", value: VALUE, notes: `token is ${VALUE}` },
+      { name: "K", value: VALUE, tags: [VALUE] },
+    ]) {
+      const result = storeSecretTool(store, args);
+      expect(result.isError).toBe(true);
+      expect(parse(result).code).toBe("value_in_metadata");
+      assertNoPlaintext(result, VALUE);
+    }
+    expect(store.isInitialized() ? store.listSecrets() : []).toHaveLength(0);
+    store.close();
+  });
+
+  it("rejects empty or multi-line names", () => {
+    const { store } = keychainStore();
+    expect(parse(storeSecretTool(store, { name: "  ", value: VALUE })).code).toBe("invalid_name");
+    expect(parse(storeSecretTool(store, { name: "A\nB", value: VALUE })).code).toBe("invalid_name");
+    expect(parse(storeSecretTool(store, { name: "x".repeat(129), value: VALUE })).code).toBe("invalid_name");
+    expect(parse(storeSecretTool(store, { name: "OK", value: "" })).code).toBe("invalid_value");
+    store.close();
+  });
+
+  it("keeps the keychain size-limit message and scrubs the value from any error", () => {
+    const dir = tempDir();
+    const tooLong = new MemoryKeychain();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: tooLong });
+    store.ensure();
+    expect(store.storageInfo().backend).toBe("keychain");
+    // Simulate the macOS backend refusing an oversized value (message shape from keychain.ts).
+    tooLong.set = (_account: string, value: string) => {
+      throw new Error(
+        `Secret is too long for the macOS Keychain helper (${Buffer.byteLength(value)} bytes, about 1900 allowed). Value was ${value}`,
+      );
+    };
+    let message = "";
+    try {
+      storeSecretTool(store, { name: "BIG_CERT", value: VALUE });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/too long for the macOS Keychain helper/);
+    expect(message).toMatch(/1900 allowed/);
+    expect(message).not.toContain(VALUE);
+    expect(message).toContain("[REDACTED]");
+    expect(store.hasSecret("BIG_CERT")).toBe(false);
+    store.close();
+  });
+
+  it("scrubValue replaces every occurrence", () => {
+    expect(scrubValue("a SECRET b SECRET", "SECRET")).toBe("a [REDACTED] b [REDACTED]");
+    expect(scrubValue("nothing", undefined)).toBe("nothing");
+  });
+
+  it("remove_secret deletes the name and the keychain value", () => {
+    const { dir, store, kc } = keychainStore();
+    storeSecretTool(store, { name: "GITHUB_TOKEN", value: VALUE });
+    storeSecretTool(store, { name: "OTHER", value: "other-value-abcdef" });
+    const result = removeSecretTool(store, "github_token");
+    assertNoPlaintext(result, VALUE);
+    const p = parse(result);
+    expect(p.ok).toBe(true);
+    expect(p.removed).toBe("GITHUB_TOKEN");
+    expect(store.hasSecret("GITHUB_TOKEN")).toBe(false);
+    expect([...kc.items.values()]).not.toContain(VALUE);
+    expect(store.listSecrets().map((m) => m.name)).toEqual(["OTHER"]);
+    expect(readFileSync(secretsStorePath(dir), "utf8")).not.toContain("GITHUB_TOKEN");
+    store.close();
+  });
+
+  it("remove_secret on an unknown name changes nothing and lists what exists", () => {
+    const { store } = keychainStore();
+    storeSecretTool(store, { name: "GITHUB_TOKEN", value: VALUE });
+    const result = removeSecretTool(store, "NOPE");
+    expect(result.isError).toBe(true);
+    const p = parse(result);
+    expect(p.code).toBe("not_found");
+    expect(p.available).toEqual(["GITHUB_TOKEN"]);
+    expect(store.hasSecret("GITHUB_TOKEN")).toBe(true);
+    store.close();
+  });
+
+  it("remove_secret before setup explains how to set up", () => {
+    const { store } = keychainStore();
+    expect(() => removeSecretTool(store, "X")).toThrow(/not set up/);
+    store.close();
+  });
+
+  it("legacy tool names point at the same implementations", () => {
+    expect(vaultSetSecretTool).toBe(storeSecretTool);
+    expect(vaultDeleteSecretTool).toBe(removeSecretTool);
   });
 });
