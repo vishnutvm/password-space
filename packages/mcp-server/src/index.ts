@@ -72,7 +72,7 @@ const dataDir = defaultDataDir();
 
 const server = new McpServer({
   name: "password-space",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 server.registerTool(
