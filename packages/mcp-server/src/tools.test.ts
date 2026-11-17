@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,6 +6,10 @@ import { MemoryKeychain, VaultStore, openVault, secretsStorePath, vaultDbPath } 
 import {
   assertNoPlaintext,
   checkPrerequisites,
+  clearOwnInjectFiles,
+  RESOLVE_SECRET_DESCRIPTION,
+  RESOLVE_SECRET_ENV,
+  resolveSecretEnabled,
   BUNDLED_CLI_NODE,
   CLI_SETUP_COMMANDS,
   bundledCliCommand,
@@ -82,14 +86,59 @@ describe("MCP tools contract", () => {
     store.close();
   });
 
-  it("resolve_secret requires confirm_redaction", () => {
+  it("resolve_secret is off by default and never reads the value", () => {
     const { store, value } = readyStore();
-    const denied = resolveSecretTool(store, { name: "DEMO_KEY" });
+    const prev = process.env[RESOLVE_SECRET_ENV];
+    delete process.env[RESOLVE_SECRET_ENV];
+    try {
+      const denied = resolveSecretTool(store, { name: "DEMO_KEY", confirm_redaction: true });
+      assertNoPlaintext(denied, value);
+      const parsed = JSON.parse(denied.content[0]!.text) as { ok: boolean; code: string; enable_hint: string };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.code).toBe("resolve_disabled");
+      expect(parsed.enable_hint).toContain(RESOLVE_SECRET_ENV);
+      // No audit "get" event: the value was never read.
+      expect(store.listAudit(50).some((e) => e.action === "get")).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env[RESOLVE_SECRET_ENV] = prev;
+    }
+    store.close();
+  });
+
+  it("resolveSecretEnabled only accepts an explicit opt-in", () => {
+    expect(resolveSecretEnabled({})).toBe(false);
+    expect(resolveSecretEnabled({ [RESOLVE_SECRET_ENV]: "" })).toBe(false);
+    expect(resolveSecretEnabled({ [RESOLVE_SECRET_ENV]: "0" })).toBe(false);
+    expect(resolveSecretEnabled({ [RESOLVE_SECRET_ENV]: "1" })).toBe(true);
+    expect(resolveSecretEnabled({ [RESOLVE_SECRET_ENV]: "true" })).toBe(true);
+    expect(RESOLVE_SECRET_DESCRIPTION).toMatch(/PLAINTEXT/);
+  });
+
+  it("resolve_secret, when the user enabled it, still requires confirm_redaction", () => {
+    const { store, value } = readyStore();
+    const denied = resolveSecretTool(store, { name: "DEMO_KEY" }, { enabled: true });
     assertNoPlaintext(denied, value);
-    const allowed = resolveSecretTool(store, { name: "DEMO_KEY", confirm_redaction: true });
+    const allowed = resolveSecretTool(store, { name: "DEMO_KEY", confirm_redaction: true }, { enabled: true });
     const parsed = JSON.parse(allowed.content[0]!.text) as { value: string; redact_in_transcript: boolean };
     expect(parsed.value).toBe(value);
     expect(parsed.redact_in_transcript).toBe(true);
+    store.close();
+  });
+
+  it("inject_secret files expire in about a minute and are deleted on shutdown", () => {
+    clearOwnInjectFiles(); // files left by earlier tests in this process
+    const { dir, store, value } = readyStore();
+    const result = injectSecretTool(store, dir, { name: "DEMO_KEY" });
+    assertNoPlaintext(result, value);
+    const parsed = JSON.parse(result.content[0]!.text) as { env_file: string; expires_at: string; instructions: string[] };
+    const ttl = Date.parse(parsed.expires_at) - Date.now();
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(60_000);
+    expect(parsed.instructions.join(" ")).toMatch(/never cat/);
+    expect(existsSync(parsed.env_file)).toBe(true);
+    expect(clearOwnInjectFiles()).toBe(1);
+    expect(existsSync(parsed.env_file)).toBe(false);
+    expect(clearOwnInjectFiles()).toBe(0);
     store.close();
   });
 

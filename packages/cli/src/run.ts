@@ -11,6 +11,7 @@ export const RUN_USAGE = `Run a command with secrets in its environment:
   -s, --secret VAR=NAME    Pass secret NAME as env var VAR
   --all                    Pass every stored secret
   --redact / --no-redact   Replace secret values in the command's output with [REDACTED]
+                           (--no-redact needs an interactive terminal)
                            (default: on when output is not a terminal, e.g. an agent)
   The command runs directly (no shell). Values never appear in argv or chat.`;
 
@@ -152,6 +153,12 @@ export async function runWithSecrets(defaultDataDir: string, opts: RunOptions): 
   }
   if (opts.specs.length === 0 && !opts.all) {
     throw new VaultError(`Name at least one secret with -s NAME (or use --all).\n\n${RUN_USAGE}`, "INVALID");
+  }
+  if (opts.redact === false && !process.stdout.isTTY) {
+    throw new VaultError(
+      "--no-redact only works when output goes to an interactive terminal. Piped or captured output (agents, scripts, logs) is always redacted.",
+      "INVALID",
+    );
   }
   const secretEnv = resolveRunEnv(opts.dataDir ?? defaultDataDir, opts);
   const redact = opts.redact ?? !process.stdout.isTTY;

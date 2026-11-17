@@ -11,7 +11,7 @@
 | MCP server (`dist/index.js`) | Status, list, inject by name |
 | Terminal CLI (`dist/cli.js`) | **Sole human UX** — interactive menu + setup / add / remove (hidden value prompts) — **bundled; no clone** |
 | Skill + `/setup-password-space` | Guided setup — Terminal-only |
-| Hooks | Gentle welcome when no store yet; redaction before send |
+| Hooks | Gentle welcome when no store yet; block prompts that contain a stored value; block agent commands and file reads that would read values directly (`get`, keychain lookups, `secrets.json`, inject files) |
 
 ## After install
 
