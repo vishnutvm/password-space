@@ -25,7 +25,8 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
 | Day-1 Terminal + MCP | Terminal `setup` / `set` for secrets; MCP `vault_status`, `list_secrets`, `inject_secret` |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
-| Redaction hook | Plugin `beforeSubmitPrompt` hook blocks outbound prompts that contain a **known** inject value |
+| Prompt hook | Cursor and Claude Code hooks block outbound prompts that contain **any stored** secret value |
+| `run` command | `password-space run -s NAME -- <cmd>` passes secrets in the command's env and redacts them from its output |
 | Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
 ## Security model
@@ -258,11 +259,9 @@ Detail: [docs/architecture.md](./docs/architecture.md).
 Older releases used an encrypted SQLite `vault.db` plus unlock sessions. That file is **never deleted or auto-migrated**.
 
 1. Keep your old `~/.password-space/vault.db` as a backup if you still need it.
-2. Run Terminal `setup` to create `secrets.json`.
+2. Run Terminal `setup` to create the new store.
 3. Re-add each secret with Terminal `set` (name + hidden value).
-4. Ask the agent to use secrets by name via `inject_secret`.
-
-The old crypto and unlock-session code is still in the repo but off the product path. See [docs/LEGACY_CODE.md](./docs/LEGACY_CODE.md).
+4. Ask the agent to use secrets by name (`run -s NAME -- <command>`).
 
 ## Troubleshooting
 

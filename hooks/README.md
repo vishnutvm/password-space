@@ -9,16 +9,18 @@ Hooks (or equivalent message filters) are the **enforcement** layer: even if an 
 | `redact.mjs` | Standalone redaction utility — stdin/stdout, **opt-in** defaults |
 | `cursor-hook.example.json` | Example Cursor hooks config shape (verify against your Cursor version) |
 
-There is **one** redaction implementation: [`plugins/password-space/scripts/redact.mjs`](../plugins/password-space/scripts/redact.mjs). The marketplace plugin wires it as its `beforeSubmitPrompt` hook (see `plugins/password-space/hooks/hooks.json`), where it defaults to `--from-inject --fail-on-leak`. `hooks/redact.mjs` here is a two-line wrapper that calls the same code with those defaults turned **off**, so it only redacts or blocks what you ask it to.
+**The plugin's prompt hook is [`plugins/password-space/scripts/prompt-guard.mjs`](../plugins/password-space/scripts/prompt-guard.mjs)**, wired as Cursor's `beforeSubmitPrompt` and Claude Code's `UserPromptSubmit`. It blocks a prompt containing **any stored value** (OS keychain values by keyed fingerprint, file-backend values, and live inject files). Try it by hand: `echo "text" | node plugins/password-space/scripts/prompt-guard.mjs` exits `2` on a match.
+
+`redact.mjs` below is a separate stdin → stdout utility for values you list explicitly or that are in inject files. [`plugins/password-space/scripts/redact.mjs`](../plugins/password-space/scripts/redact.mjs) defaults to `--from-inject --fail-on-leak`; `hooks/redact.mjs` here wraps the same code with those defaults turned **off**.
 
 | Entry | Defaults | Use |
 | --- | --- | --- |
-| `plugins/password-space/scripts/redact.mjs` | `--from-inject --fail-on-leak` | Cursor hook (plugin install) |
+| `plugins/password-space/scripts/redact.mjs` | `--from-inject --fail-on-leak` | Filtering with inject values (no longer the plugin hook) |
 | `hooks/redact.mjs` | `--no-from-inject --no-fail-on-leak` | Ad-hoc filtering, other clients, tests |
 
 Both accept the same flags; later flags override earlier ones.
 
-Claude Code cannot rewrite a prompt, so the Claude Code plugin uses a separate guard, `plugins/password-space/scripts/claude-prompt-guard.mjs`, that **blocks** a prompt containing any stored value (from `secrets.json` and inject files). See [docs/claude-code.md](../docs/claude-code.md).
+See [docs/claude-code.md](../docs/claude-code.md) for the Claude Code side.
 
 Cursor’s hooks format evolves; treat the JSON example as a **template**, not a guaranteed schema.
 
