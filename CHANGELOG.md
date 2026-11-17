@@ -56,6 +56,10 @@ plugin installs may not have picked up these changes until now.
   `UserPromptSubmit` hook. (#15)
 - Prompt hooks for Cursor and Claude Code block a prompt that contains any
   stored value of 6 or more characters. (#17)
+- OpenAI Codex support: `password-space codex-setup [--write]` registers the
+  bundled MCP server, a setup hint and the prompt guard hook in
+  `~/.codex/config.toml` and copies the skill to `~/.agents/skills`. See
+  [docs/codex.md](./docs/codex.md). (#21)
 - CI that builds, tests and checks the committed plugin bundles are fresh.
   (#14)
 - The CLI can be published to npm as `password-space`, with a release

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Prompt hook for Cursor (beforeSubmitPrompt) and Claude Code (UserPromptSubmit):
+ * Prompt hook for Cursor (beforeSubmitPrompt), Claude Code and Codex (UserPromptSubmit):
  * blocks a prompt that contains the value of any stored Password Space secret.
  *
  * Checks every stored secret, not only recently injected ones:
@@ -10,9 +10,10 @@
  *   - live inject/*.env files
  * Values shorter than 6 characters are skipped to avoid false blocks.
  *
- * Output by host (auto-detected from hook_event_name, or --format cursor|claude|text):
+ * Output by host (auto-detected from hook_event_name, or --format cursor|claude|codex|text):
  *   cursor: stdout {"continue": false, "user_message": ...}, exit 2
  *   claude: reason on stderr, exit 2 (Claude Code erases the prompt and shows it)
+ *   codex:  same as claude (Codex blocks on exit 2 and shows stderr as the reason)
  *   text:   stdin is the raw text; names on stderr, exit 2
  * Never prints a secret value. If the guard itself fails, the prompt is allowed
  * and a warning goes to stderr, so a broken keychain never locks you out of chat.
@@ -43,8 +44,9 @@ try {
 }
 
 const event = typeof input?.hook_event_name === "string" ? input.hook_event_name : "";
+const requested = argFormat();
 const format =
-  argFormat() ??
+  (requested === "codex" ? "claude" : requested) ??
   (input === null || typeof input !== "object"
     ? "text"
     : event === "UserPromptSubmit"
