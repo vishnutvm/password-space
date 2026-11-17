@@ -151,7 +151,7 @@ Commands:
   codex-setup [--write]  Print (or append) the ~/.codex/config.toml block for OpenAI Codex
   menu | interactive     Full interactive menu
   onboard                Print next Terminal step
-  get <name>             Print secret value (human only — not for agents)
+  get <name>             Show a value (interactive terminal only, asks first)
   audit                  Recent access events (no values)
   help                   Show this help
 
@@ -407,6 +407,49 @@ async function runRemove(dataDir: string, args: Args): Promise<void> {
   console.log(`✓ Deleted ${name}`);
 }
 
+/**
+ * True when `get` may print a value: both stdin and stdout are an interactive
+ * terminal. Agent shell tools, pipes, `$(...)` and redirects all fail this.
+ */
+function canRevealInTerminal(
+  stdin: { isTTY?: boolean } = input,
+  stdout: { isTTY?: boolean } = output,
+): boolean {
+  return stdin.isTTY === true && stdout.isTTY === true;
+}
+
+async function runGet(dataDir: string, args: Args): Promise<void> {
+  const name = args.positional[0];
+  if (!name) throw new VaultError("Usage: password-space get <name>", "INVALID");
+  if (!canRevealInTerminal()) {
+    throw new VaultError(
+      `get only prints a value to an interactive terminal, so agents and scripts cannot read it.
+Use the secret by name instead: ${selfCmd()} run -s ${JSON.stringify(name)} -- <command>`,
+      "INVALID",
+    );
+  }
+  const store = openVault({ dataDir });
+  if (!store.isInitialized()) {
+    store.close();
+    throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
+  }
+  // Check the name exists before asking, without reading the value.
+  const meta = store.getMetadata(name);
+  const confirm = await promptVisible(`Show the value of "${meta.name}" on screen? [y/N]: `);
+  if (!/^y(es)?$/i.test(confirm)) {
+    store.close();
+    console.log("Cancelled.");
+    return;
+  }
+  const secret = store.getSecret(name, "human-cli");
+  store.close();
+  if (args.flags.json) {
+    console.log(JSON.stringify(secret, null, 2));
+  } else {
+    output.write(`${secret.value}\n`);
+  }
+}
+
 async function runList(
   dataDir: string,
   flags: Record<string, string | boolean>,
@@ -614,24 +657,9 @@ async function main(): Promise<void> {
         await runSet(dataDir, args);
         break;
 
-      case "get": {
-        const name = args.positional[0];
-        if (!name) throw new VaultError("Usage: password-space get <name>", "INVALID");
-        const store = openVault({ dataDir });
-        if (!store.isInitialized()) {
-          store.close();
-          throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
-        }
-        const secret = store.getSecret(name, "human-cli");
-        store.close();
-        if (args.flags.json) {
-          console.log(JSON.stringify(secret, null, 2));
-        } else {
-          output.write(secret.value);
-          if (output.isTTY) output.write("\n");
-        }
+      case "get":
+        await runGet(dataDir, args);
         break;
-      }
 
       case "list":
         await runList(dataDir, args.flags);

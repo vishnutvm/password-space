@@ -1,25 +1,56 @@
 {
-  "name": "@password-space/cli",
-  "version": "0.1.0",
-  "description": "CLI for Password Space local vault",
-  "license": "MIT",
-  "type": "module",
-  "bin": {
-    "password-space": "./dist/index.js"
-  },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "files": [
-    "dist"
+  "name": "password-space",
+  "version": "0.2.0",
+  "description": "Local named secret store for developers and AI agents, backed by your OS keychain. Run commands with secrets by name, never paste them in chat.",
+  "keywords": [
+    "secrets",
+    "password",
+    "vault",
+    "keychain",
+    "credentials",
+    "mcp",
+    "ai-agents",
+    "cli"
   ],
+  "homepage": "https://github.com/vishnutvm/password-space#readme",
+  "bugs": {
+    "url": "https://github.com/vishnutvm/password-space/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vishnutvm/password-space.git",
+    "directory": "packages/cli"
+  },
+  "license": "MIT",
+  "author": "Vishnu (https://github.com/vishnutvm)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "bin": {
+    "password-space": "./dist/password-space.js"
+  },
+  "files": [
+    "dist/password-space.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node ../../scripts/bundle-cli-npm.mjs",
+    "prepack": "node ../../scripts/bundle-cli-npm.mjs",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
-    "@password-space/vault": "workspace:*"
-  },
   "devDependencies": {
+    "@password-space/vault": "workspace:*",
     "@types/node": "^22.13.4",
     "smol-toml": "1.3.1",
     "typescript": "^5.7.3",

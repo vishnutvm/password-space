@@ -11,6 +11,8 @@ Hooks (or equivalent message filters) are the **enforcement** layer: even if an 
 
 **The plugin's prompt hook is [`plugins/password-space/scripts/prompt-guard.mjs`](../plugins/password-space/scripts/prompt-guard.mjs)**, wired as Cursor's `beforeSubmitPrompt` and Claude Code's `UserPromptSubmit`. It blocks a prompt containing **any stored value** (OS keychain values by keyed fingerprint, file-backend values, and live inject files). Try it by hand: `echo "text" | node plugins/password-space/scripts/prompt-guard.mjs` exits `2` on a match.
 
+**The plugin's tool hook is [`plugins/password-space/scripts/shell-guard.mjs`](../plugins/password-space/scripts/shell-guard.mjs)**, wired as Claude Code's `PreToolUse` (`Bash`, `Read`, `Grep`) and Cursor's `beforeShellExecution` and `beforeReadFile`. It blocks `password-space get`, direct keychain lookups (`security find-generic-password`, `secret-tool lookup`, `CredRead`), and reads of `secrets.json` or `inject/*.env` (sourcing an inject file is allowed). It is a guard rail, not a sandbox: see [SECURITY.md](../SECURITY.md#what-an-agent-with-shell-access-can-still-do).
+
 `redact.mjs` below is a separate stdin → stdout utility for values you list explicitly or that are in inject files. [`plugins/password-space/scripts/redact.mjs`](../plugins/password-space/scripts/redact.mjs) defaults to `--from-inject --fail-on-leak`; `hooks/redact.mjs` here wraps the same code with those defaults turned **off**.
 
 | Entry | Defaults | Use |

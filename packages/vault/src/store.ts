@@ -267,6 +267,8 @@ export class VaultStore {
     tags?: string[];
     notes?: string | null;
     id?: string;
+    /** Who made the change, recorded in the audit log (names only, never values). */
+    actor?: string;
   }): SecretMetadata {
     this.ensure();
     const data = this.requireReady();
@@ -301,7 +303,7 @@ export class VaultStore {
     this.writeValue(row, input.value);
     if (!existing) data.secrets.push(row);
     this.persist();
-    this.audit(existing ? "update" : "create", row.id, name, "human", null);
+    this.audit(existing ? "update" : "create", row.id, name, input.actor ?? "human", null);
     return this.getMetadata(row.id);
   }
 
@@ -319,14 +321,19 @@ export class VaultStore {
     row.guard = guardPrint(key, value);
   }
 
-  deleteSecret(idOrName: string): void {
+  /** True when a secret with this exact id or (case-insensitive) name exists. */
+  hasSecret(idOrName: string): boolean {
+    return this.findRow(idOrName) !== undefined;
+  }
+
+  deleteSecret(idOrName: string, actor = "human"): void {
     const data = this.requireReady();
     const row = this.findRow(idOrName);
     if (!row) throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
     if (data.backend === "keychain") this.requireKeychain().delete(this.account(row.id));
     data.secrets = data.secrets.filter((s) => s.id !== row.id);
     this.persist();
-    this.audit("delete", row.id, row.name, "human", null);
+    this.audit("delete", row.id, row.name, actor, null);
   }
 
   /**

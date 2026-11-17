@@ -27,9 +27,9 @@ After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and re
 | Path | Role |
 | --- | --- |
 | `packages/vault` | Plain store, inject, redact |
-| `packages/cli` | Human CLI (also bundled to plugin `dist/cli.js`) |
+| `packages/cli` | Human CLI, published to npm as `password-space` (also bundled to plugin `dist/cli.js`) |
 | `packages/mcp-server` | MCP tools for agents |
-| `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |
+| `plugins/password-space` | Cursor and Claude Code plugin (bundled MCP + CLI + skill + hooks + logo) |
 | `skills/password-space` | Convenience Skill mirror |
 | `hooks/` | Standalone redaction utility + hook examples |
 
@@ -38,7 +38,20 @@ After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and re
 - Keep PRs focused; include tests for store behavior or MCP no-leak contracts when touching those paths.
 - Do not commit real secrets, `~/.password-space` data, or `.demo-data/`.
 - Update README / SECURITY.md if behavior or threat model changes.
+- Add a line under `## [Unreleased]` in [CHANGELOG.md](./CHANGELOG.md) for anything a user would notice.
+- Do not change version numbers in a feature PR; they move together at release time.
 - Keep plugin Skill (`plugins/password-space/skills/…`) and root `skills/` mirror in sync when editing agent guidance.
+
+## Versions and releases
+
+One version covers the whole project. The root `package.json` is the source of
+truth, and `pnpm version:check` (also run by `pnpm test`) fails if any package,
+plugin manifest, marketplace entry or MCP server identity disagrees. Releases
+are cut by a maintainer; the steps are in [docs/RELEASING.md](./docs/RELEASING.md).
+
+## Reporting security issues
+
+See [SECURITY.md](./SECURITY.md). Never in a public issue.
 
 ## Code of conduct
 

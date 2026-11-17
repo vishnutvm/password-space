@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - "packages/vault/**"
+      - "packages/mcp-server/**"
+      - "plugins/password-space/dist/**"
       - ".github/workflows/keychain.yml"
   push:
     branches: [main]
@@ -32,6 +34,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Build (the MCP end-to-end test drives the bundled plugin)
+        run: pnpm build
 
       - name: Linux keyring
         if: runner.os == 'Linux'
@@ -43,6 +47,7 @@ jobs:
           dbus-run-session -- bash -c '
             echo -n ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null
             pnpm --filter @password-space/vault exec vitest run src/keychain.test.ts src/store-keychain.test.ts
+            pnpm --filter @password-space/mcp-server exec vitest run src/mcp-stdio.e2e.test.ts
           '
 
       - name: Throwaway macOS keychain
@@ -57,3 +62,7 @@ jobs:
       - name: Keychain tests (macOS, Windows)
         if: runner.os != 'Linux'
         run: pnpm --filter @password-space/vault exec vitest run src/keychain.test.ts src/store-keychain.test.ts
+
+      - name: Agent store/use/remove over MCP against the real keychain (macOS, Windows)
+        if: runner.os != 'Linux'
+        run: pnpm --filter @password-space/mcp-server exec vitest run src/mcp-stdio.e2e.test.ts
