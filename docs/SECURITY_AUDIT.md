@@ -83,9 +83,9 @@ setup (create secrets.json) → set / list / inject / remove
 | `vault_init` | No | Ensures `secrets.json` exists. `passphrase` arg accepted and ignored |
 | `vault_unlock` / `vault_lock` | No | No-ops. Clear leftover legacy `session` file and expired inject files |
 | `vault_change_passphrase` | No | Returns `ok: false, code: "passphrase_not_used"` |
-| `vault_set_secret` | Value in args; not in result | Leak check on serialize. Humans should prefer Terminal `set` |
+| `store_secret` (alias `vault_set_secret`) | Value in args; not in result | Leak check on serialize; value scrubbed from errors; rejects a value inside name/notes/tags; existing name needs `overwrite: true`; audit actor `mcp-agent` |
 | `list_secrets` / `get_secret_metadata` | No | |
-| `vault_delete_secret` | No | |
+| `remove_secret` (alias `vault_delete_secret`) | No | Unknown name changes nothing; audit actor `mcp-agent` |
 | `inject_secret` | File only | See boundary above |
 | `resolve_secret` | **Yes** in result | Not registered unless `PASSWORD_SPACE_ENABLE_RESOLVE=1`; then requires `confirm_redaction` |
 
@@ -94,7 +94,7 @@ setup (create secrets.json) → set / list / inject / remove
 1. Terminal CLI hidden prompt (`dist/cli.js set`) — **primary**
 2. stdin pipe to `set` (non-TTY)
 3. `--value` flag (discouraged: shell history)
-4. MCP `vault_set_secret` args (agent path; value never echoed)
+4. MCP `store_secret` args (agent path: the user hands the agent a key once; value never echoed, but the user's chat message still holds it)
 
 **Forbidden:** MCP elicitation or Vault Manager App forms for secret values; pasting values into chat.
 

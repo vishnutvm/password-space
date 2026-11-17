@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "esbuild";
 import { openVault } from "@password-space/vault";
-import { StreamRedactor, envNameFor, parseRunArgs } from "./run.js";
+import { StreamRedactor, envNameFor, parseRunArgs, quoteWindowsArg } from "./run.js";
 
 describe("parseRunArgs", () => {
   it("splits options from the command at --", () => {
@@ -33,6 +33,22 @@ describe("envNameFor", () => {
     expect(envNameFor("openai-api-key")).toBe("OPENAI_API_KEY");
     expect(envNameFor("1password")).toBe("_1PASSWORD");
     expect(envNameFor("***")).toBe("SECRET");
+  });
+});
+
+describe("quoteWindowsArg", () => {
+  it("leaves plain arguments alone", () => {
+    expect(quoteWindowsArg("gh")).toBe("gh");
+    expect(quoteWindowsArg("--flag=1")).toBe("--flag=1");
+    expect(quoteWindowsArg("C:\\tools\\node.exe")).toBe("C:\\tools\\node.exe");
+  });
+
+  it("quotes paths with spaces and scripts with quotes", () => {
+    expect(quoteWindowsArg("C:\\Program Files\\nodejs\\node.exe")).toBe('"C:\\Program Files\\nodejs\\node.exe"');
+    expect(quoteWindowsArg("console.log('a b')")).toBe(`"console.log('a b')"`);
+    expect(quoteWindowsArg('say "hi"')).toBe('"say \\"hi\\""');
+    expect(quoteWindowsArg("")).toBe('""');
+    expect(quoteWindowsArg("dir with space\\")).toBe('"dir with space\\\\"');
   });
 });
 
