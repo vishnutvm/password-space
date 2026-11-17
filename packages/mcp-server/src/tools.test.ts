@@ -192,7 +192,7 @@ describe("vault lifecycle MCP tools", () => {
   });
 
   it("buildPrimaryAction prefers cli_setup when store missing", () => {
-    const action = buildPrimaryAction(false, false, false);
+    const action = buildPrimaryAction(false);
     expect(action.id).toBe("cli_setup");
     expect(action.recommended_path).toBe("cli_setup");
     expect(action.mcp_tool).toBeUndefined();
@@ -204,7 +204,7 @@ describe("vault lifecycle MCP tools", () => {
   });
 
   it("buildPrimaryAction prefers cli_set when store ready", () => {
-    const action = buildPrimaryAction(true, true, true);
+    const action = buildPrimaryAction(true);
     expect(action.id).toBe("cli_set");
     expect(action.recommended_path).toBe("cli_set");
     expect(action.copy_paste_command).toBe(bundledCliCommand("set"));
@@ -217,7 +217,7 @@ describe("vault lifecycle MCP tools", () => {
   });
 
   it("buildPrimaryAction returns fix_node when prereq fails", () => {
-    const action = buildPrimaryAction(false, false, false, false);
+    const action = buildPrimaryAction(false, false);
     expect(action.id).toBe("fix_node");
     expect(action.do_this).toMatch(/Node\.js/i);
   });

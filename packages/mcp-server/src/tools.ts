@@ -88,21 +88,6 @@ export function bundledCliCommand(
   return sub ? `${base} ${sub}` : base;
 }
 
-export class NodeVersionError extends Error {
-  readonly code = "node_too_old" as const;
-  readonly found: string;
-  readonly required: string;
-
-  constructor(found: string, requiredMajor: number) {
-    super(
-      `Password Space needs Node.js ${requiredMajor}+. Found ${found}.`,
-    );
-    this.name = "NodeVersionError";
-    this.found = found;
-    this.required = `>=${requiredMajor}`;
-  }
-}
-
 const TRUST_LINE =
   "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal, or hand one to your agent once and it saves it with store_secret; after that it is used by name and never shown again.";
 
@@ -154,22 +139,13 @@ export function checkPrerequisites(
   };
 }
 
-export function assertNodeVersion(nodeVersion: string = process.version): void {
-  const check = checkPrerequisites(nodeVersion);
-  if (!check.node_ok) {
-    throw new NodeVersionError(check.node_version, MIN_NODE_MAJOR);
-  }
-}
-
 export type SetupState =
   | "fix_node"
   | "needs_init"
-  | "ready"
-  | "recover_existing_vault";
+  | "ready";
 
 export function onboardingProgress(
   initialized: boolean,
-  _unlocked = true,
 ): { phase: string; headline: string; step_of: string } {
   if (!initialized) {
     return {
@@ -224,8 +200,6 @@ export type PrimaryAction = {
 export function resolveSetupState(opts: {
   prereqOk: boolean;
   initialized: boolean;
-  unlocked?: boolean;
-  session?: boolean;
 }): SetupState {
   if (!opts.prereqOk) return "fix_node";
   if (!opts.initialized) return "needs_init";
@@ -234,8 +208,6 @@ export function resolveSetupState(opts: {
 
 export function buildPrimaryAction(
   initialized: boolean,
-  _unlocked = true,
-  _session = true,
   prereqOk = true,
 ): PrimaryAction {
   if (!prereqOk) {
@@ -308,8 +280,6 @@ export function buildPrimaryAction(
 
 export function buildOnboardingSteps(
   initialized: boolean,
-  _unlocked = true,
-  _session = true,
 ): OnboardingStep[] {
   return [
     {
@@ -405,7 +375,7 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     initialized,
   });
   const steps = buildOnboardingSteps(initialized);
-  const primary_action = buildPrimaryAction(initialized, true, true, prereq.ok);
+  const primary_action = buildPrimaryAction(initialized, prereq.ok);
   const ready = initialized && prereq.ok;
   const recovery = recoveryGuidance({
     setup_state,
@@ -473,7 +443,7 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
     initialized,
   });
   const steps = buildOnboardingSteps(initialized);
-  const primary_action = buildPrimaryAction(initialized, true, true, prereq.ok);
+  const primary_action = buildPrimaryAction(initialized, prereq.ok);
   const recovery = recoveryGuidance({
     setup_state,
     initialized,

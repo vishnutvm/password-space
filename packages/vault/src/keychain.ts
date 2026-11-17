@@ -349,13 +349,6 @@ export class MemoryKeychain implements Keychain {
 
 // ---------------------------------------------------------------- selection
 
-let override: Keychain | null | undefined;
-
-/** Tests: force a keychain (or `null` for "no keychain on this machine"). `undefined` resets. */
-export function setKeychainForTesting(kc: Keychain | null | undefined): void {
-  override = kc;
-}
-
 function onPath(bin: string): boolean {
   const r = defaultRunner(process.platform === "win32" ? "where" : "which", [bin]);
   return r.status === 0;
@@ -366,7 +359,6 @@ function onPath(bin: string): boolean {
  * Does not touch the keychain; call {@link probeKeychain} to test it works.
  */
 export function platformKeychain(platform: NodeJS.Platform = process.platform): Keychain | null {
-  if (override !== undefined) return override;
   if (process.env.PASSWORD_SPACE_KEYCHAIN === "none") return null;
   if (platform === "darwin") {
     return existsSync("/usr/bin/security") ? new MacKeychain() : null;

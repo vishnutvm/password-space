@@ -37778,14 +37778,11 @@ var WindowsCredentialManager = class {
     this.call("delete", account);
   }
 };
-var override;
 function onPath(bin) {
   const r2 = defaultRunner(process.platform === "win32" ? "where" : "which", [bin]);
   return r2.status === 0;
 }
 function platformKeychain(platform = process.platform) {
-  if (override !== void 0)
-    return override;
   if (process.env.PASSWORD_SPACE_KEYCHAIN === "none")
     return null;
   if (platform === "darwin") {
@@ -38392,19 +38389,6 @@ function bundledCliCommand(subcommand = "") {
   const sub = subcommand.trim();
   return sub ? `${base} ${sub}` : base;
 }
-var NodeVersionError = class extends Error {
-  code = "node_too_old";
-  found;
-  required;
-  constructor(found, requiredMajor) {
-    super(
-      `Password Space needs Node.js ${requiredMajor}+. Found ${found}.`
-    );
-    this.name = "NodeVersionError";
-    this.found = found;
-    this.required = `>=${requiredMajor}`;
-  }
-};
 var TRUST_LINE = "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal, or hand one to your agent once and it saves it with store_secret; after that it is used by name and never shown again.";
 function storageFields(store) {
   const info = store.storageInfo();
@@ -38433,7 +38417,7 @@ function checkPrerequisites(nodeVersion = process.version) {
     howToFix: nodeOk ? void 0 : `Install Node.js ${MIN_NODE_MAJOR} or newer from https://nodejs.org, then reload Cursor (MCP runs on the host Node).`
   };
 }
-function onboardingProgress(initialized, _unlocked = true) {
+function onboardingProgress(initialized) {
   if (!initialized) {
     return {
       phase: "1/2",
@@ -38452,7 +38436,7 @@ function resolveSetupState(opts) {
   if (!opts.initialized) return "needs_init";
   return "ready";
 }
-function buildPrimaryAction(initialized, _unlocked = true, _session = true, prereqOk = true) {
+function buildPrimaryAction(initialized, prereqOk = true) {
   if (!prereqOk) {
     return {
       id: "fix_node",
@@ -38514,7 +38498,7 @@ function buildPrimaryAction(initialized, _unlocked = true, _session = true, prer
     }
   };
 }
-function buildOnboardingSteps(initialized, _unlocked = true, _session = true) {
+function buildOnboardingSteps(initialized) {
   return [
     {
       id: "check",
@@ -38595,7 +38579,7 @@ function vaultOnboardTool(store, dataDir2) {
     initialized
   });
   const steps = buildOnboardingSteps(initialized);
-  const primary_action = buildPrimaryAction(initialized, true, true, prereq.ok);
+  const primary_action = buildPrimaryAction(initialized, prereq.ok);
   const ready = initialized && prereq.ok;
   const recovery = recoveryGuidance({
     setup_state,
@@ -38653,7 +38637,7 @@ function vaultStatusTool(store, dataDir2) {
     initialized
   });
   const steps = buildOnboardingSteps(initialized);
-  const primary_action = buildPrimaryAction(initialized, true, true, prereq.ok);
+  const primary_action = buildPrimaryAction(initialized, prereq.ok);
   const recovery = recoveryGuidance({
     setup_state,
     initialized,
@@ -39219,17 +39203,7 @@ if (resolveSecretEnabled()) {
 function errorResult(err, secretValue) {
   const message = scrubValue(err instanceof Error ? err.message : String(err), secretValue);
   const payload = { ok: false, error: message };
-  if (err instanceof NodeVersionError) {
-    payload.code = err.code;
-    payload.found = err.found;
-    payload.required = err.required;
-    payload.howToFix = "Install Node.js 20+ from https://nodejs.org, then reload Cursor. Do not edit mcp.json.";
-    payload.what_to_do = [
-      "Run `node -v` in Terminal \u2014 it must be v20 or newer.",
-      "Reload the Cursor window.",
-      "Run /setup-password-space again."
-    ];
-  } else if (/not set up|not initialized/i.test(message)) {
+  if (/not set up|not initialized/i.test(message)) {
     payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_setup}\` or /setup-password-space and follow primary_action (Terminal-first; no clone).`;
     payload.recommended_path = "cli_setup";
     payload.copy_paste_command = bundledCliCommand("setup");
