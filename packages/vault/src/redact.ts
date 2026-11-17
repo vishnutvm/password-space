@@ -14,11 +14,6 @@ export function redactSecrets(text: string, secrets: string[]): string {
 }
 
 /** Mask a secret for display: show first/last char only when long enough. */
-export function maskSecret(value: string): string {
-  if (value.length <= 4) return "****";
-  return `${value.slice(0, 2)}${"*".repeat(Math.min(value.length - 4, 12))}${value.slice(-2)}`;
-}
-
 export function looksLikeSecretLeak(text: string, secrets: string[]): boolean {
   return secrets.some((s) => s.length > 0 && text.includes(s));
 }

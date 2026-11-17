@@ -1,7 +1,7 @@
 # Password Space in Claude Code
 
 The same plugin folder (`plugins/password-space`) works in Claude Code. It ships
-the MCP server, the Terminal CLI, the setup skill and command, and two
+the MCP server, the Terminal CLI, the setup skill and command, and three
 Claude Code hooks. Requires **Node.js 20+** and Claude Code with plugin support.
 
 ## Install
@@ -36,8 +36,9 @@ remove that entry so the tools are not registered twice:
    node "/Users/you/.claude/plugins/cache/.../password-space/dist/cli.js" setup
    node "/Users/you/.claude/plugins/cache/.../password-space/dist/cli.js" set
    ```
-3. Back in Claude Code, refer to secrets by name and let Claude use
-   `inject_secret`. Never paste values into the prompt.
+3. Back in Claude Code, refer to secrets by name. Claude runs commands as
+   `cli.js run -s NAME -- <command>`, so the value goes into that command's
+   environment. Never paste values into the prompt.
 
 The store is the same as in Cursor: `~/.password-space/secrets.json`
 (or a real absolute `PASSWORD_SPACE_HOME`). Cursor, Claude Code and Codex ([codex.md](./codex.md)) share it.

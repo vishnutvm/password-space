@@ -12,7 +12,7 @@
     {
       "name": "password-space",
       "source": "./plugins/password-space",
-      "description": "Name secrets in Terminal, inject them by name over MCP, never paste them in chat.",
+      "description": "Name secrets in Terminal, use them by name from your agent, never paste them in chat.",
       "version": "0.2.0",
       "category": "security",
       "keywords": ["secrets", "vault", "mcp", "credentials"]

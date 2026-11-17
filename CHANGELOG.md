@@ -12,6 +12,19 @@ bundled MCP server and the `password-space` CLI on npm. See
 
 ## [Unreleased]
 
+### Removed
+
+- Unused code left from the encrypted vault, the duplicate root `skills/` and
+  `hooks/` copies, the unused `redact.mjs` hook script, and stale internal
+  audit notes under `docs/`. Cursor install docs are now one page,
+  [docs/cursor.md](./docs/cursor.md).
+
+### Security
+
+- Dependency updates for `npm audit` findings: `zod` 4 and
+  `@modelcontextprotocol/sdk` 1.32.2 in the MCP server, patched `hono` and
+  `@hono/node-server`, and newer `vitest` and `smol-toml` for development.
+
 ## [0.2.0] - Unreleased
 
 First tagged release. Everything before it shipped as `0.1.0` from `main`, so
@@ -25,8 +38,8 @@ plugin installs may not have picked up these changes until now.
   no keychain fall back to plain values in `secrets.json`, and `status`,
   `setup` and `vault_status` say so. (#17)
 - **No unlock step.** The encrypted `vault.db` with a passphrase was replaced
-  by a named store that needs no unlock. `lock` / `unlock` remain as no-op MCP
-  tools. An existing `vault.db` is never wiped or migrated automatically. (#13)
+  by a named store that needs no unlock. The `lock` / `unlock` MCP tools are
+  gone; the CLI commands only print a notice. An existing `vault.db` is never wiped or migrated automatically. (#13)
 - Versions are now kept in sync across every package, plugin manifest and
   marketplace entry, so plugin hosts see each release as an update.
 
@@ -69,7 +82,7 @@ plugin installs may not have picked up these changes until now.
 
 - `run` quotes its command line correctly on Windows. (#18)
 - macOS keychain writes of long values (one `security -i` line). (#17)
-- Docs aligned with the plain store; a single redaction implementation. (#16)
+- Docs aligned with the plain store. (#16)
 
 ## [0.1.0]
 

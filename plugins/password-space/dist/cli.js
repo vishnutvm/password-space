@@ -305,14 +305,11 @@ var WindowsCredentialManager = class {
     this.call("delete", account);
   }
 };
-var override;
 function onPath(bin) {
   const r = defaultRunner(process.platform === "win32" ? "where" : "which", [bin]);
   return r.status === 0;
 }
 function platformKeychain(platform = process.platform) {
-  if (override !== void 0)
-    return override;
   if (process.env.PASSWORD_SPACE_KEYCHAIN === "none")
     return null;
   if (platform === "darwin") {
@@ -974,9 +971,9 @@ var REQUIRED = ["dist/index.js", "dist/cli.js", "scripts/prompt-guard.mjs"];
 function isPluginRoot(dir) {
   return REQUIRED.every((f) => existsSync4(join2(dir, f)));
 }
-function resolvePluginRoot(cliFile, override2) {
-  if (override2) {
-    const dir = resolve(override2);
+function resolvePluginRoot(cliFile, override) {
+  if (override) {
+    const dir = resolve(override);
     if (!isPluginRoot(dir)) {
       throw new VaultError(`${dir} is not a Password Space plugin folder (needs ${REQUIRED.join(", ")})`, "INVALID");
     }

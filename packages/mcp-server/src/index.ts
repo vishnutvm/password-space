@@ -25,7 +25,6 @@ import { clearExpiredInjectFiles, defaultDataDir } from "@password-space/vault";
 import {
   CLI_SETUP_COMMANDS,
   bundledCliCommand,
-  NodeVersionError,
   RESOLVE_SECRET_DESCRIPTION,
   clearOwnInjectFiles,
   getSecretMetadataTool,
@@ -336,18 +335,7 @@ function errorResult(err: unknown, secretValue?: string) {
   const message = scrubValue(err instanceof Error ? err.message : String(err), secretValue);
   const payload: Record<string, unknown> = { ok: false, error: message };
 
-  if (err instanceof NodeVersionError) {
-    payload.code = err.code;
-    payload.found = err.found;
-    payload.required = err.required;
-    payload.howToFix =
-      "Install Node.js 20+ from https://nodejs.org, then reload Cursor. Do not edit mcp.json.";
-    payload.what_to_do = [
-      "Run `node -v` in Terminal — it must be v20 or newer.",
-      "Reload the Cursor window.",
-      "Run /setup-password-space again.",
-    ];
-  } else if (/not set up|not initialized/i.test(message)) {
+  if (/not set up|not initialized/i.test(message)) {
     payload.howToFix = `Run \`${CLI_SETUP_COMMANDS.plugin_setup}\` or /setup-password-space and follow primary_action (Terminal-first; no clone).`;
     payload.recommended_path = "cli_setup";
     payload.copy_paste_command = bundledCliCommand("setup");

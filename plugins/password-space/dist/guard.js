@@ -299,13 +299,11 @@ var WindowsCredentialManager = class {
     this.call("delete", account);
   }
 };
-var override;
 function onPath(bin) {
   const r = defaultRunner(process.platform === "win32" ? "where" : "which", [bin]);
   return r.status === 0;
 }
 function platformKeychain(platform = process.platform) {
-  if (override !== void 0) return override;
   if (process.env.PASSWORD_SPACE_KEYCHAIN === "none") return null;
   if (platform === "darwin") {
     return existsSync("/usr/bin/security") ? new MacKeychain() : null;

@@ -1,10 +1,8 @@
 # Contributing
 
-Thanks for helping make Password Space better.
-
 ## Principles
 
-1. **Chat stays clean** — MCP list/metadata tools must not return values; prefer inject handles.
+1. **Chat stays clean** — MCP list/metadata tools must not return values; agents use secrets by name through `run`.
 2. **Terminal-only human UX** — no App UI / Configure variables for secret entry.
 3. **OS keychain store** — values in the OS keychain, names in `secrets.json` (mode `0600`), plain-file fallback only without a keychain; do not reintroduce unlock as a required gate without an explicit product decision.
 4. **Local-first** — sync/cloud features are out of scope until designed with a threat model update.
@@ -26,12 +24,11 @@ After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and re
 
 | Path | Role |
 | --- | --- |
-| `packages/vault` | Plain store, inject, redact |
+| `packages/vault` | Store, OS keychain backends, inject, redact |
 | `packages/cli` | Human CLI, published to npm as `password-space` (also bundled to plugin `dist/cli.js`) |
 | `packages/mcp-server` | MCP tools for agents |
-| `plugins/password-space` | Cursor and Claude Code plugin (bundled MCP + CLI + skill + hooks + logo) |
-| `skills/password-space` | Convenience Skill mirror |
-| `hooks/` | Standalone redaction utility + hook examples |
+| `plugins/password-space` | Cursor and Claude Code plugin, also used by Codex (bundled MCP + CLI + skill + hooks + logo) |
+| `scripts/` | Bundling, version sync, hook script tests |
 
 ## Pull requests
 
@@ -40,7 +37,6 @@ After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and re
 - Update README / SECURITY.md if behavior or threat model changes.
 - Add a line under `## [Unreleased]` in [CHANGELOG.md](./CHANGELOG.md) for anything a user would notice.
 - Do not change version numbers in a feature PR; they move together at release time.
-- Keep plugin Skill (`plugins/password-space/skills/…`) and root `skills/` mirror in sync when editing agent guidance.
 
 ## Versions and releases
 

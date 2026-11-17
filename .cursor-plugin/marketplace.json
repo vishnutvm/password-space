@@ -5,14 +5,14 @@
     "email": "vishnutvm@users.noreply.github.com"
   },
   "metadata": {
-    "description": "Install · Create vault · Use secrets — no secrets in chat.",
+    "description": "Local named secret store for AI agents: secrets by name, never in chat.",
     "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "password-space",
       "source": "./plugins/password-space",
-      "description": "Install · Create vault · Use secrets — no secrets in chat.",
+      "description": "Name secrets in Terminal, use them by name from your agent, never paste them in chat.",
       "logo": "plugins/password-space/assets/logo.svg"
     }
   ]

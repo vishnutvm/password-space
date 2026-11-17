@@ -2,7 +2,7 @@
   "name": "@password-space/vault",
   "version": "0.2.0",
   "private": true,
-  "description": "Local plain-text named secret store for Password Space",
+  "description": "Named secret store with OS keychain backends for Password Space",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "typescript": "^5.7.3",
-    "vitest": "^3.0.5",
+    "vitest": "^4.1.12",
     "@types/node": "^22.13.4"
   }
 }

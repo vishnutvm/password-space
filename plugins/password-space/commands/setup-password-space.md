@@ -25,7 +25,7 @@ Tell them to install **Node.js 20+** from https://nodejs.org, reload Cursor, the
 
 ## If store ready (`cli_set`)
 
-Show Terminal **`copy_paste_command`** for set (or bare `cli.js` for the interactive menu). After they finish, confirm with **`list_secrets`** / **`vault_status`**. Prefer **`inject_secret`** for agent use by name.
+Show Terminal **`copy_paste_command`** for set (or bare `cli.js` for the interactive menu). After they finish, confirm with **`list_secrets`** / **`vault_status`**. For agent use, run commands as `cli.js run -s NAME -- <command>`; use **`inject_secret`** only when a command cannot be wrapped.
 
 ## Legacy encrypted vault
 
