@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { VaultError, openVault } from "@password-space/vault";
+import { VaultError, envNameFor, openVault } from "@password-space/vault";
 
 export const RUN_USAGE = `Run a command with secrets in its environment:
   password-space run -s GITHUB_TOKEN -- gh repo list
@@ -57,14 +57,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
   return opts;
 }
 
-export function envNameFor(secretName: string): string {
-  const cleaned = secretName
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  if (!cleaned) return "SECRET";
-  return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
-}
+export { envNameFor };
 
 /** Resolve specs to env vars. Throws before anything runs if a name is unknown. */
 export function resolveRunEnv(dataDir: string, opts: Pick<RunOptions, "specs" | "all">): Record<string, string> {

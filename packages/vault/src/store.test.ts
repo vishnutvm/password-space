@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { VaultStore } from "./store.js";
 import { redactSecrets, looksLikeSecretLeak } from "./redact.js";
 import { writeInjectFile, clearExpiredInjectFiles } from "./inject.js";
-import { secretsStorePath } from "./paths.js";
+import { auditLogPath, secretsStorePath } from "./paths.js";
 
 const dirs: string[] = [];
 
@@ -69,6 +69,34 @@ describe("VaultStore plain text", () => {
     expect(() => store.setSecret({ name: "B", value: "x", id: store.getMetadata("A").id })).toThrow(
       /already exists/i,
     );
+    store.close();
+  });
+
+  it("hasSecret matches names case-insensitively and ids exactly", () => {
+    const { store } = tmpVault();
+    store.ensure();
+    const meta = store.setSecret({ name: "GitHub Token", value: "v-123456" });
+    expect(store.hasSecret("github token")).toBe(true);
+    expect(store.hasSecret(meta.id)).toBe(true);
+    expect(store.hasSecret("nope")).toBe(false);
+    store.close();
+  });
+
+  it("records the actor for set and delete in the audit log, never the value", () => {
+    const { dir, store } = tmpVault();
+    store.ensure();
+    store.setSecret({ name: "K", value: "audit-value-987654", actor: "mcp-agent" });
+    store.deleteSecret("K", "mcp-agent");
+    store.setSecret({ name: "H", value: "human-value-987654" });
+    const log = readFileSync(auditLogPath(dir), "utf8");
+    expect(log).not.toContain("audit-value-987654");
+    expect(log).not.toContain("human-value-987654");
+    const events = store.listAudit().filter((e) => e.secretName);
+    expect(events.map((e) => [e.action, e.secretName, e.actor])).toEqual([
+      ["create", "H", "human"],
+      ["delete", "K", "mcp-agent"],
+      ["create", "K", "mcp-agent"],
+    ]);
     store.close();
   });
 });
