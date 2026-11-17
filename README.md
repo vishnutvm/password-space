@@ -25,7 +25,7 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
 | Day-1 Terminal + MCP | Terminal `setup` / `set` for secrets; MCP `vault_status`, `list_secrets`, `inject_secret` |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
-| Redaction hook | Optional `beforeSubmitPrompt` hook strips **known** inject values from outbound prompts |
+| Redaction hook | Plugin `beforeSubmitPrompt` hook blocks outbound prompts that contain a **known** inject value |
 | Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
 ## Security model
@@ -211,6 +211,8 @@ Older releases used an encrypted SQLite `vault.db` plus unlock sessions. That fi
 3. Re-add each secret with Terminal `set` (name + hidden value).
 4. Ask the agent to use secrets by name via `inject_secret`.
 
+The old crypto and unlock-session code is still in the repo but off the product path. See [docs/LEGACY_CODE.md](./docs/LEGACY_CODE.md).
+
 ## Troubleshooting
 
 | Symptom | Likely cause | What to do |
@@ -233,5 +235,6 @@ pnpm install && pnpm build && pnpm test
 | `packages/cli` | Human Terminal CLI |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
 | `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |
+| `hooks/` | Portable redaction wrapper (same code as the plugin hook, opt-in defaults) |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
