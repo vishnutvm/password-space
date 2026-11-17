@@ -1,6 +1,6 @@
 # Password Space
 
-**A local named secret store for Cursor** — plain files on your Mac, designed so agents never need your secrets in chat.
+**A local named secret store for Cursor** — values in your OS keychain, designed so agents never need your secrets in chat.
 
 [Getting started in 2 minutes](../../docs/onboarding.md)
 
@@ -26,11 +26,11 @@
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"        # interactive menu
    ```
-4. Back in Cursor: ask the agent to use the secret **by name** via `inject_secret` / `list_secrets`.
+4. Back in Cursor: ask the agent to use the secret **by name**. It runs commands as `cli.js run -s NAME -- <command>`, so the value goes into the command's environment, not the chat.
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
-**Trust:** Secrets stay local as plain files (`~/.password-space/secrets.json`, mode 0600). Values never belong in chat. Lock/unlock not needed.
+**Trust:** Values live in the macOS Keychain, Windows Credential Manager or Linux Secret Service; `~/.password-space/secrets.json` holds names only (plain-file fallback where there is no keychain — `status` says which). Prompts containing a stored value are blocked. Values never belong in chat.
 
 Default store folder: `~/.password-space`. Optional override: a real absolute `PASSWORD_SPACE_HOME` in the process environment or MCP Environment (never an unresolved `${PASSWORD_SPACE_HOME}`).
 

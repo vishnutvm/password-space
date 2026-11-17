@@ -20,7 +20,7 @@ Tell them to install **Node.js 20+** from https://nodejs.org, reload Cursor, the
 ## If store does not exist (`cli_setup`)
 
 - Show Terminal `copy_paste_command` (typically `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup`, or an absolute path when MCP resolves it).
-- No passphrase. Creates `~/.password-space/secrets.json` (plain text, mode 0600).
+- No passphrase. Creates `~/.password-space/secrets.json` (names only; values go to the OS keychain, or stay in that file where no keychain exists). If it offers to move existing values into the keychain, recommend yes.
 - Then show **set** so they can name a secret.
 
 ## If store ready (`cli_set`)

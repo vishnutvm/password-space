@@ -1,11 +1,11 @@
 ---
 name: password-space
-description: Install · One-time Setup · Start Using. Follow vault_onboard primary_action — Terminal-only interactive CLI for setup/add/remove; never ask users to edit mcp.json or clone the repo. Lock/unlock not needed.
+description: Install · One-time Setup · Start Using. Follow vault_onboard primary_action — Terminal-only interactive CLI for setup/add/remove; never ask users to edit mcp.json or clone the repo. Use secrets by name via `run`.
 ---
 
 # Password Space
 
-Local **plain-text named secrets** on the user's machine (`~/.password-space/secrets.json`). **One obvious next step** — follow `primary_action` only.
+Named secrets on the user's machine: values in the **OS keychain**, names in `~/.password-space/secrets.json`. **One obvious next step** — follow `primary_action` only.
 
 ## Newcomer path (default = plugin Terminal CLI)
 
@@ -18,15 +18,26 @@ Local **plain-text named secrets** on the user's machine (`~/.password-space/sec
    - Bare `node "…/dist/cli.js"` opens the **interactive menu** (setup, add, remove, list, status).
    - Tell the user to run it and enter the **secret name**, then the **value** at the **hidden** prompt.
    - **Do not** require unlock or a passphrase.
-   - After Terminal steps: `vault_status` / `list_secrets` / `inject_secret`.
+   - After Terminal steps: `vault_status` / `list_secrets`, then use secrets with `run` (below).
 5. **No `git clone`.** The CLI ships inside the marketplace plugin. Clone is optional for contributors only.
 6. Secret **name + value** go in **Terminal only** — **never** in chat, **never** via elicitation, **never** via App forms.
 
 ### Product path
 
-- Store is **local plain files** — values are readable at rest on disk (mode `0600`).
+- Values live in the **OS keychain** (macOS Keychain, Windows Credential Manager, Linux Secret Service). Without one they fall back to `secrets.json` in plain text; if `vault_status` shows `migrate_command`, suggest the user run it in Terminal.
 - **Lock / unlock / passphrase are not needed.**
-- Name a secret once in Terminal, then ask the agent to use it **by name** (`inject_secret`).
+- Name a secret once in Terminal, then use it **by name**.
+
+## Using a secret (agents)
+
+Run the command through the CLI so the value goes straight into the process environment:
+
+```bash
+node "<plugin>/dist/cli.js" run -s GITHUB_TOKEN -- gh repo list
+node "<plugin>/dist/cli.js" run -s OPENAI_API_KEY=openai-prod -- npm test
+```
+
+`vault_status` returns the exact `run_command` with the right path. Output is redacted for you. Never `cat ~/.password-space/*`, never `get`, never echo the variable. Use `inject_secret` only when a command cannot be wrapped with `run`. A prompt that contains a stored value is blocked by the plugin hook.
 
 ### Never do this
 
@@ -44,11 +55,11 @@ Do **not** call **`vault_manager`** for setup or secrets. It is status-only. Hum
 ## After store exists
 
 - **Terminal** `set` / `remove` / interactive menu — primary way to add or delete
-- **`list_secrets`** / **`vault_status`** / **`inject_secret`** — MCP by name (no unlock)
+- **`list_secrets`** / **`vault_status`** — MCP by name; **`run -s NAME -- <command>`** to use one
 
 ## Legacy encrypted vault
 
-If `vault_onboard` reports `legacy_encrypted_vault`, the old `vault.db` is **left untouched**. Tell the user to re-add secrets with Terminal `set` into the new plain store. Do not invent a destructive migrate-by-default.
+If `vault_onboard` reports `legacy_encrypted_vault`, the old `vault.db` is **left untouched**. Tell the user to re-add secrets with Terminal `set`. Do not invent a destructive migrate-by-default.
 
 ## Never
 

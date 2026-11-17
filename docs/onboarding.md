@@ -1,6 +1,6 @@
 # Getting started in 2 minutes
 
-Password Space keeps your API keys and passwords **on your Mac** as **local plain named files**, and **out of chat**.
+Password Space keeps your API keys and passwords **in your OS keychain** under names you choose, and **out of chat**.
 
 > **Trust:** Secrets stay on your device. Name them once in Terminal; your agent uses them by name without pasting values into the conversation. Lock/unlock are not needed.
 
@@ -17,7 +17,7 @@ Password Space keeps your API keys and passwords **on your Mac** as **local plai
 | **1. Welcome** | Run **`/setup-password-space`** | `vault_onboard` |
 | **2. Store** | Terminal: `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup` | follow `copy_paste_command` |
 | **3. Save** | Terminal: `…/dist/cli.js set` (name + hidden value) | then `list_secrets` |
-| **4. Use** | Ask the agent to use `NAME` | `inject_secret` |
+| **4. Use** | Ask the agent to use `NAME` | `cli.js run -s NAME -- <command>` |
 
 ### The one rule
 
@@ -27,12 +27,13 @@ Never paste secret values into chat. Create and add secrets in **Terminal**. **N
 
 - **Add a secret:** Terminal `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set`
 - **Status / list:** `vault_status` / `list_secrets`
-- **Use a saved credential:** `inject_secret` (preferred — no value in chat)
+- **Use a saved credential:** the agent runs `cli.js run -s NAME -- <command>` (no value in chat or on disk)
+- **Upgrading from plain `secrets.json`:** run `…/dist/cli.js migrate` once to move values into the keychain
 - **No App UI for secrets:** human add/remove is Terminal-only; ignore `vault_manager` for setup
 
 ## Coming from the old encrypted vault?
 
-If you already have `~/.password-space/vault.db` from an earlier release, it is **left untouched**. Re-add secrets with Terminal `set` into the new `secrets.json` store. There is no destructive migrate-by-default.
+If you already have `~/.password-space/vault.db` from an earlier release, it is **left untouched**. Re-add secrets with Terminal `set`. There is no destructive migrate-by-default.
 
 ## Need help?
 
