@@ -1,8 +1,8 @@
 {
-  "name": "password-space",
-  "version": "0.1.0",
+  "name": "password-space-monorepo",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local credential vault for humans and AI agents \u2014 secrets via MCP, never in chat",
+  "description": "Local credential vault for humans and AI agents — secrets via MCP, never in chat",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@9.15.0",
@@ -12,11 +12,13 @@
   "scripts": {
     "build": "pnpm -r run build && pnpm run build:plugin",
     "build:plugin": "node scripts/bundle-mcp.mjs",
-    "test": "pnpm -r run test && node --test scripts/vault-manager-html.test.mjs scripts/prompt-guard.test.mjs scripts/shell-guard.test.mjs",
+    "test": "pnpm -r run test && node --test scripts/vault-manager-html.test.mjs scripts/prompt-guard.test.mjs scripts/shell-guard.test.mjs && node scripts/version.mjs check",
     "lint": "pnpm -r run lint --if-present",
     "password-space": "node --no-warnings packages/cli/dist/index.js",
     "mcp": "node --no-warnings plugins/password-space/dist/index.js",
-    "demo": "bash scripts/demo.sh"
+    "demo": "bash scripts/demo.sh",
+    "version:check": "node scripts/version.mjs check",
+    "version:set": "node scripts/version.mjs set"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",

@@ -110,6 +110,16 @@ node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" remove
 
 If `vault_onboard` returns an absolute path to `cli.js`, prefer that paste command.
 
+### From npm
+
+The Terminal CLI is published as [`password-space`](https://www.npmjs.com/package/password-space) once a release has gone out:
+
+```bash
+npm install -g password-space
+password-space setup
+password-space set GITHUB_TOKEN
+```
+
 ### Contributors (optional clone)
 
 ```bash
@@ -301,9 +311,9 @@ pnpm install && pnpm build && pnpm test
 | Path | Role |
 | --- | --- |
 | `packages/vault` | Store, OS keychain backends, prompt guard, inject, redact |
-| `packages/cli` | Human Terminal CLI |
+| `packages/cli` | Human Terminal CLI, published to npm as `password-space` |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
 | `plugins/password-space` | Cursor and Claude Code plugin (bundled MCP + CLI + skill + hooks + logo) |
 | `hooks/` | Portable redaction wrapper (same code as the plugin hook, opt-in defaults) |
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Changes: [CHANGELOG.md](./CHANGELOG.md). Releases: [docs/RELEASING.md](./docs/RELEASING.md). License: [MIT](./LICENSE).

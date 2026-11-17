@@ -23,3 +23,4 @@ tmp/
 .idea/
 *.log
 .npm/
+packages/cli/LICENSE

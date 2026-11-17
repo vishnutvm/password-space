@@ -114,6 +114,35 @@ review an agent's shell commands when it handles credentials.
 Older releases stored ciphertext in `vault.db`. That file is **never wiped or
 auto-migrated**. Users re-add secrets via Terminal `set`.
 
-### Reporting
+## Supported versions
 
-Please report security issues privately to the repository owner. Do not open public issues that include real secrets or exploit details that would harm other users.
+Password Space is pre-1.0. Security fixes land on `main` and ship in the next
+release; only the latest release is supported.
+
+| Version | Supported |
+| --- | --- |
+| Latest release (see [CHANGELOG.md](./CHANGELOG.md)) | Yes |
+| Older releases, untagged `0.1.0` builds | No. Update the plugin or `npm install -g password-space@latest` |
+
+## Reporting a vulnerability
+
+Report vulnerabilities **privately** through GitHub:
+[Security → Report a vulnerability](https://github.com/vishnutvm/password-space/security/advisories/new).
+Do not open a public issue, pull request or discussion for an unfixed
+vulnerability, and never include a real secret value in any report.
+
+Please include the version, OS and storage backend (`password-space status`),
+and the steps that expose a value or bypass a guard.
+
+What to expect:
+
+- An acknowledgement within 7 days.
+- An assessment and, if the report is valid, a fix plan within 30 days.
+- Credit in the release notes and advisory, unless you prefer not to be named.
+
+In scope: anything that lets a value reach a chat transcript, log, tool result
+or file it should not, a way around the prompt hooks or `run` redaction that
+the docs say is covered, or a weakness in how values are written to or read
+from the keychain. Known limits listed in the threat model above (for example
+a process running as your user asking the keychain directly) are not
+vulnerabilities on their own, but reports that narrow them are welcome.
