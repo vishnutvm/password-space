@@ -1,0 +1,160 @@
+name: Release
+
+# Push a tag like v0.2.0 to cut a release. See docs/RELEASING.md.
+# Run it by hand (Actions → Release → Run workflow) for a dry run that checks
+# everything and builds the npm package without releasing or publishing.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Read version
+        id: meta
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+
+      - name: Check every version matches (and the tag, when there is one)
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            node scripts/version.mjs check --tag "${GITHUB_REF_NAME}"
+          else
+            node scripts/version.mjs check
+          fi
+
+      - name: Check CHANGELOG has a dated section for this version
+        if: github.ref_type == 'tag'
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          if ! grep -Eq "^## \[${v//./\\.}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md needs a heading '## [$v] - YYYY-MM-DD' before tagging."
+            exit 1
+          fi
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Check committed plugin bundles match a fresh build
+        run: |
+          if [ -n "$(git status --porcelain -- plugins/password-space/dist)" ]; then
+            echo "::error::plugins/password-space/dist is out of date. Run 'pnpm build' and commit before tagging."
+            git status --porcelain -- plugins/password-space/dist
+            exit 1
+          fi
+
+      - name: Pack the CLI for npm
+        id: pack
+        working-directory: packages/cli
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          pnpm pack --pack-destination "$RUNNER_TEMP/pkg"
+          tarball="$(ls "$RUNNER_TEMP/pkg"/*.tgz | xargs -n1 basename)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          tar -tzf "$RUNNER_TEMP/pkg/$tarball"
+          # Smoke test: install the tarball on its own and run it.
+          mkdir -p "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP/pkg/$tarball"
+          npx --no-install password-space help > "$RUNNER_TEMP/help.txt"
+          head -3 "$RUNNER_TEMP/help.txt"
+
+      - name: Extract release notes
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          awk -v v="$v" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on && /^\[[^]]+\]: / { next }
+            on { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/pkg/notes.md"
+          cat "$RUNNER_TEMP/pkg/notes.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/pkg/
+          if-no-files-found: error
+
+  github-release:
+    needs: verify
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: pkg
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=""
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then flags="--prerelease"; fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Password Space ${GITHUB_REF_NAME}" \
+            --notes-file pkg/notes.md \
+            $flags \
+            "pkg/${{ needs.verify.outputs.tarball }}"
+
+  # Off until you opt in: set the repository variable NPM_PUBLISH to "true"
+  # and add an NPM_TOKEN secret (an npm automation or granular token).
+  npm-publish:
+    needs: [verify, github-release]
+    if: github.ref_type == 'tag' && vars.NPM_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: pkg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          tag=latest
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then tag=next; fi
+          npm publish "pkg/${{ needs.verify.outputs.tarball }}" --access public --provenance --tag "$tag"

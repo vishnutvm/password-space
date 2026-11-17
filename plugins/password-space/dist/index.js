@@ -30150,7 +30150,7 @@ function loadVaultManagerHtml() {
 var dataDir = defaultDataDir();
 var server = new McpServer({
   name: "password-space",
-  version: "0.1.0"
+  version: "0.2.0"
 });
 server.registerTool(
   "vault_onboard",
