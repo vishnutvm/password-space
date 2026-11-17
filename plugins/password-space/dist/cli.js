@@ -829,6 +829,11 @@ ${RUN_USAGE}`, "INVALID");
   opts.command = argv.slice(i);
   return opts;
 }
+function quoteWindowsArg(arg) {
+  if (arg !== "" && /^[A-Za-z0-9_\-+=.,:/\\@]+$/.test(arg)) return arg;
+  const escaped = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1");
+  return `"${escaped}"`;
+}
 function resolveRunEnv(dataDir, opts) {
   const store = openVault({ dataDir });
   try {
@@ -903,13 +908,14 @@ ${RUN_USAGE}`, "INVALID");
   }
   const secretEnv = resolveRunEnv(opts.dataDir ?? defaultDataDir2, opts);
   const redact = opts.redact ?? !process.stdout.isTTY;
-  const [cmd, ...args] = opts.command;
+  const isWindows = process.platform === "win32";
+  const [cmd, ...args] = isWindows ? opts.command.map(quoteWindowsArg) : opts.command;
   return await new Promise((resolve) => {
     const child = spawn(cmd, args, {
       env: { ...process.env, ...secretEnv },
       stdio: redact ? ["inherit", "pipe", "pipe"] : "inherit",
       // .cmd/.bat shims (npm, npx, ...) only start through the shell on Windows.
-      shell: process.platform === "win32"
+      shell: isWindows
     });
     const values = Object.values(secretEnv);
     const out = redact ? new StreamRedactor(values, (s) => process.stdout.write(s)) : null;

@@ -148,7 +148,7 @@ describe.skipIf(!bundled)("bundled MCP server over stdio", () => {
       ],
       { env: env(), encoding: "utf8" },
     );
-    expect(r.status).toBe(0);
+    expect(r.status, `cli run failed: ${r.stderr}`).toBe(0);
     expect(r.stdout).toContain(`len=${ROTATED.length}`);
     expect(r.stdout).toContain("value=[REDACTED]");
     expect(r.stdout).not.toContain(ROTATED);
