@@ -766,7 +766,7 @@ var VaultStore = class {
 };
 
 // packages/vault/dist/inject.js
-var DEFAULT_INJECT_TTL_MS = 5 * 60 * 1e3;
+var DEFAULT_INJECT_TTL_MS = 60 * 1e3;
 
 // packages/vault/dist/env-name.js
 function envNameFor(secretName) {
@@ -794,6 +794,7 @@ var RUN_USAGE = `Run a command with secrets in its environment:
   -s, --secret VAR=NAME    Pass secret NAME as env var VAR
   --all                    Pass every stored secret
   --redact / --no-redact   Replace secret values in the command's output with [REDACTED]
+                           (--no-redact needs an interactive terminal)
                            (default: on when output is not a terminal, e.g. an agent)
   The command runs directly (no shell). Values never appear in argv or chat.`;
 function parseRunArgs(argv) {
@@ -905,6 +906,12 @@ ${RUN_USAGE}`, "INVALID");
     throw new VaultError(`Name at least one secret with -s NAME (or use --all).
 
 ${RUN_USAGE}`, "INVALID");
+  }
+  if (opts.redact === false && !process.stdout.isTTY) {
+    throw new VaultError(
+      "--no-redact only works when output goes to an interactive terminal. Piped or captured output (agents, scripts, logs) is always redacted.",
+      "INVALID"
+    );
   }
   const secretEnv = resolveRunEnv(opts.dataDir ?? defaultDataDir2, opts);
   const redact = opts.redact ?? !process.stdout.isTTY;
@@ -1069,7 +1076,7 @@ Commands:
   migrate [--to file]    Move values into the OS keychain (or back to secrets.json)
   menu | interactive     Full interactive menu
   onboard                Print next Terminal step
-  get <name>             Print secret value (human only \u2014 not for agents)
+  get <name>             Show a value (interactive terminal only, asks first)
   audit                  Recent access events (no values)
   help                   Show this help
 
@@ -1288,6 +1295,40 @@ async function runRemove(dataDir, args) {
   store.close();
   console.log(`\u2713 Deleted ${name}`);
 }
+function canRevealInTerminal(stdin = input, stdout = output) {
+  return stdin.isTTY === true && stdout.isTTY === true;
+}
+async function runGet(dataDir, args) {
+  const name = args.positional[0];
+  if (!name) throw new VaultError("Usage: password-space get <name>", "INVALID");
+  if (!canRevealInTerminal()) {
+    throw new VaultError(
+      `get only prints a value to an interactive terminal, so agents and scripts cannot read it.
+Use the secret by name instead: ${selfCmd()} run -s ${JSON.stringify(name)} -- <command>`,
+      "INVALID"
+    );
+  }
+  const store = openVault({ dataDir });
+  if (!store.isInitialized()) {
+    store.close();
+    throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
+  }
+  const meta = store.getMetadata(name);
+  const confirm = await promptVisible(`Show the value of "${meta.name}" on screen? [y/N]: `);
+  if (!/^y(es)?$/i.test(confirm)) {
+    store.close();
+    console.log("Cancelled.");
+    return;
+  }
+  const secret = store.getSecret(name, "human-cli");
+  store.close();
+  if (args.flags.json) {
+    console.log(JSON.stringify(secret, null, 2));
+  } else {
+    output.write(`${secret.value}
+`);
+  }
+}
 async function runList(dataDir, flags) {
   const store = openVault({ dataDir });
   if (!store.isInitialized()) {
@@ -1434,24 +1475,9 @@ async function main() {
       case "add":
         await runSet(dataDir, args);
         break;
-      case "get": {
-        const name = args.positional[0];
-        if (!name) throw new VaultError("Usage: password-space get <name>", "INVALID");
-        const store = openVault({ dataDir });
-        if (!store.isInitialized()) {
-          store.close();
-          throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
-        }
-        const secret = store.getSecret(name, "human-cli");
-        store.close();
-        if (args.flags.json) {
-          console.log(JSON.stringify(secret, null, 2));
-        } else {
-          output.write(secret.value);
-          if (output.isTTY) output.write("\n");
-        }
+      case "get":
+        await runGet(dataDir, args);
         break;
-      }
       case "list":
         await runList(dataDir, args.flags);
         break;

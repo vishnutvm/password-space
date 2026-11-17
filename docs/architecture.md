@@ -26,4 +26,4 @@ Marketplace installs ship a self-contained MCP + CLI bundle (`plugins/password-s
 
 ## Why not return secrets in MCP by default
 
-MCP tool results are often mirrored into chat UIs and logs. `inject_secret` keeps the conversation plane on **refs** (`ps://NAME`) while the runtime plane reads a file. `resolve_secret` exists for constrained clients and requires explicit `confirm_redaction`.
+MCP tool results are often mirrored into chat UIs and logs. `inject_secret` keeps the conversation plane on **refs** (`ps://NAME`) while the runtime plane reads a file. `resolve_secret` exists for constrained clients. It is only registered when the user sets `PASSWORD_SPACE_ENABLE_RESOLVE=1` in the server env, and it requires explicit `confirm_redaction`.
