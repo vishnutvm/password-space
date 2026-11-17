@@ -33,12 +33,14 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 
 **Designed to protect:** chat/transcript plane when agents use `inject_secret` / tool-arg secrets and follow the Skill (handles like `ps://NAME` instead of values).
 
-**Does not protect against:** malware or an agent running as your user that calls the keychain or `password-space get` itself; plaintext in process memory, inject `*.env` files, or CLI `get` / `resolve_secret` results; a command that prints its own environment when output redaction is off; hooks that are disabled. With the file fallback, anyone who can read your user files can read `secrets.json`.
+**Does not protect against:** malware, or an agent running as your user that deliberately works around it (for example obfuscated keychain commands, `get` inside a pseudo-terminal, or sourcing an inject file and printing it); plaintext in process memory; a command that encodes or sends its own environment; hooks that are disabled. With the file fallback, anyone who can read your user files can read `secrets.json`. See [SECURITY.md](./SECURITY.md#what-an-agent-with-shell-access-can-still-do).
+
+**Closed by default for agents:** CLI `get` only prints to an interactive terminal; `run --no-redact` needs a terminal; `resolve_secret` is not even listed unless you set `PASSWORD_SPACE_ENABLE_RESOLVE=1`; inject files live 60 seconds and are deleted when the MCP server exits; tool hooks block `get`, direct keychain lookups and reads of `secrets.json` / inject files.
 
 | Area | MVP behavior |
 | --- | --- |
 | At rest | Values in the OS keychain (service `password-space`). `secrets.json` (mode `0600`) has names, tags, notes and keyed fingerprints. File fallback: values in `secrets.json` |
-| Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, mode `0600`, default TTL **5 minutes** |
+| Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, dir `0700`, file `0600`, default TTL **60 seconds**, deleted at expiry and when the MCP server exits |
 | Prompt hooks | Cursor and Claude Code prompts that contain **any stored value** are blocked (values of 6+ characters) |
 | `run` output | Values are replaced with `[REDACTED]` in the command's output when it is not a terminal |
 
@@ -174,7 +176,7 @@ Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugi
 | `list_secrets` | No | Discover names / ids / tags |
 | `get_secret_metadata` | No | One secret’s metadata |
 | `inject_secret` | **No** (writes env file) | Agent access by name when the CLI `run` command cannot be used |
-| `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |
+| `resolve_secret` | Yes, if `confirm_redaction: true` | **Off by default**: only listed when you set `PASSWORD_SPACE_ENABLE_RESOLVE=1` in the MCP server env |
 
 ## Storage
 
@@ -236,9 +238,10 @@ value to a temporary file.
 | What does `inject_secret` return? | JSON with `handle` (`ps://NAME`), `env_file`, `env_var`, `expires_at`, `redact_in_transcript: true` — **not** the secret value |
 | Where is the file? | `$PASSWORD_SPACE_HOME/inject/<random>.env` |
 | Permissions? | Written with mode `0600` |
-| How to use without printing? | Read/source the file in a shell or tool runtime; do **not** `cat` it into chat |
+| How to use without printing? | Source it in the same command: `set -a; . FILE; set +a; <command>`. The tool hooks block `cat`, `grep` and `Read` on it |
+| How long does it live? | 60 seconds. The MCP server deletes it at expiry and when it exits |
 
-Avoid CLI `get` and MCP `resolve_secret` in agent workflows — both can put plaintext into the tool/CLI result stream.
+CLI `get` refuses to print without an interactive terminal, and `resolve_secret` is off unless you opt in, so agents use `run` or `inject_secret`.
 
 ## Architecture
 

@@ -43,7 +43,7 @@ setup (create secrets.json) → set / list / inject / remove
          │ runtime may read file
          ▼
 ┌──────────────────┐
-│ inject/<tok>.env │  plaintext KEY='value'  mode 0600  TTL 5 min
+│ inject/<tok>.env │  plaintext KEY='value'  mode 0600  TTL 60 s
 └────────┬─────────┘
          │ same OS user / malware can read while present
          ▼
@@ -72,7 +72,7 @@ setup (create secrets.json) → set / list / inject / remove
 2. Auto-delete **expired** inject files on inject and on soft-compat unlock/lock.
 3. Skill + command: never print inject file contents.
 4. `redact_in_transcript: true` flag for cooperating clients.
-5. Default TTL 5 minutes.
+5. Default TTL 60 seconds; deleted by a timer at expiry and when the MCP server exits.
 6. `beforeSubmitPrompt` hook (`plugins/password-space/scripts/redact.mjs`) blocks outbound prompts that contain a known inject value.
 
 ## MCP tool matrix
@@ -87,7 +87,7 @@ setup (create secrets.json) → set / list / inject / remove
 | `list_secrets` / `get_secret_metadata` | No | |
 | `vault_delete_secret` | No | |
 | `inject_secret` | File only | See boundary above |
-| `resolve_secret` | **Yes** in result | Requires `confirm_redaction` |
+| `resolve_secret` | **Yes** in result | Not registered unless `PASSWORD_SPACE_ENABLE_RESOLVE=1`; then requires `confirm_redaction` |
 
 ## Secret value channels (allowed)
 

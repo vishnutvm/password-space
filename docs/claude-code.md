@@ -59,6 +59,7 @@ The store is the same as in Cursor: `~/.password-space/secrets.json`
 | --- | --- | --- |
 | `sessionStart` → `session-vault-hint.mjs` | `SessionStart` (startup) → `claude-session-hint.mjs` | Adds a setup hint to Claude's context when `secrets.json` does not exist. Silent once the store exists. |
 | `beforeSubmitPrompt` → `prompt-guard.mjs --format cursor` | `UserPromptSubmit` → `prompt-guard.mjs --format claude` | **Blocks** a prompt that contains any stored secret value and tells you which secret name matched. Same script for both. |
+| `beforeShellExecution` + `beforeReadFile` → `shell-guard.mjs --format cursor` | `PreToolUse` (`Bash`, `Read`, `Grep`) → `shell-guard.mjs --format claude` | **Blocks** agent tool calls that would read a value directly: `get`, keychain lookups, `secrets.json`, inject files. Same script for both. |
 
 What does not carry over:
 

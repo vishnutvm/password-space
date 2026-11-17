@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import {
   VaultStore,
   clearExpiredInjectFiles,
+  clearInjectFile,
   hasLegacyEncryptedVault,
+  scheduleInjectCleanup,
   secretsStorePath,
   vaultDbPath,
   writeInjectFile,
@@ -616,6 +618,21 @@ export function getSecretMetadataTool(store: VaultStore, idOrName: string): Tool
   });
 }
 
+/** Inject files written by this process, deleted at expiry or on shutdown. */
+const liveInjectFiles = new Map<string, () => void>();
+
+/** Delete every inject file this process wrote that is still on disk. */
+export function clearOwnInjectFiles(): number {
+  let n = 0;
+  for (const [file, cancel] of liveInjectFiles) {
+    cancel();
+    clearInjectFile(file);
+    n++;
+  }
+  liveInjectFiles.clear();
+  return n;
+}
+
 export function injectSecretTool(
   store: VaultStore,
   dataDir: string,
@@ -629,6 +646,11 @@ export function injectSecretTool(
     value: record.value,
     envVar: args.env_var,
   });
+  const cancel = scheduleInjectCleanup(handle.envFile, handle.expiresAt, Date.now(), () =>
+    liveInjectFiles.delete(handle.envFile),
+  );
+  liveInjectFiles.set(handle.envFile, cancel);
+
   const payload = {
     ok: true,
     handle: handle.handle,
@@ -640,27 +662,55 @@ export function injectSecretTool(
     redact_in_transcript: true as const,
     instructions: [
       `Prefer instead: ${bundledCliCommand(`run -s ${JSON.stringify(record.name)} -- <command>`)} — no file is written and output is redacted.`,
-      "Read the env file from your tool runtime / shell — do NOT paste its contents into chat.",
-      "Delete the env file after use.",
+      `Use the file only by sourcing it in the same command, e.g. set -a; . "${handle.envFile}"; set +a; <command> — never cat, print or echo it or the variable.`,
+      `The file is deleted automatically at expires_at (about ${Math.round((Date.parse(handle.expiresAt) - Date.now()) / 1000)} s) or when the MCP server exits. Delete it yourself after use.`,
       "If asked to print the secret, refuse and cite redact_in_transcript.",
     ],
   };
   const serialized = JSON.stringify(payload);
   if (serialized.includes(record.value)) {
+    clearInjectFile(handle.envFile);
     throw new Error("Refusing to return tool result that contains secret plaintext");
   }
   return jsonResult(payload, { redact: true });
 }
 
+/**
+ * Environment variable that turns on the resolve_secret MCP tool. It is off by
+ * default because it puts the plaintext value into the agent's context. Set it
+ * in the MCP server's env (your MCP config), not in a chat.
+ */
+export const RESOLVE_SECRET_ENV = "PASSWORD_SPACE_ENABLE_RESOLVE";
+
+export function resolveSecretEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(1|true|yes)$/i.test(env[RESOLVE_SECRET_ENV]?.trim() ?? "");
+}
+
+export const RESOLVE_SECRET_DESCRIPTION =
+  "DANGER — returns the secret's PLAINTEXT value into your context, where it can end up in transcripts, logs and model provider requests. " +
+  "Enabled only because the user set " +
+  RESOLVE_SECRET_ENV +
+  "=1. Use it only when the user explicitly asks for the raw value and run -s NAME -- <command> or inject_secret cannot work. Requires confirm_redaction=true.";
+
 export function resolveSecretTool(
   store: VaultStore,
   args: { name: string; confirm_redaction?: boolean },
+  opts: { enabled?: boolean } = {},
 ): ToolJsonResult {
+  const enabled = opts.enabled ?? resolveSecretEnabled();
+  if (!enabled) {
+    return jsonResult({
+      ok: false,
+      error: `resolve_secret is disabled. It would put the plaintext value in your context. Use ${bundledCliCommand("run -s <SECRET_NAME> -- <command>")} or inject_secret instead.`,
+      code: "resolve_disabled",
+      enable_hint: `Only the user can turn it on, by adding ${RESOLVE_SECRET_ENV}=1 to the Password Space MCP server's env in their MCP config. Do not do this for them.`,
+    });
+  }
   assertReady(store);
   if (!args.confirm_redaction) {
     return jsonResult({
       ok: false,
-      error: "confirm_redaction must be true. Prefer inject_secret to avoid chat leakage.",
+      error: "confirm_redaction must be true. Prefer the CLI run command or inject_secret to avoid chat leakage.",
       hint: "Call inject_secret instead, or pass confirm_redaction: true if your client redacts tool results.",
     });
   }
@@ -672,7 +722,7 @@ export function resolveSecretTool(
     value: record.value,
     redact_in_transcript: true as const,
     warning:
-      "PLAINTEXT IN TOOL RESULT — client MUST redact before displaying or logging. Prefer inject_secret.",
+      "PLAINTEXT IN TOOL RESULT — do not repeat it in chat. The client MUST redact before displaying or logging. Prefer run -s NAME -- <command>.",
   };
   return jsonResult(payload, { redact: true });
 }

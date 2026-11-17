@@ -1,10 +1,15 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { VaultStore } from "./store.js";
 import { redactSecrets, looksLikeSecretLeak } from "./redact.js";
-import { writeInjectFile, clearExpiredInjectFiles } from "./inject.js";
+import {
+  DEFAULT_INJECT_TTL_MS,
+  clearExpiredInjectFiles,
+  scheduleInjectCleanup,
+  writeInjectFile,
+} from "./inject.js";
 import { secretsStorePath } from "./paths.js";
 
 const dirs: string[] = [];
@@ -111,5 +116,64 @@ describe("inject", () => {
     );
     expect(clearExpiredInjectFiles(dir)).toBe(1);
     expect(existsSync(expired)).toBe(false);
+  });
+
+  it("defaults to a one-minute TTL in an owner-only directory", () => {
+    const { dir } = tmpVault();
+    expect(DEFAULT_INJECT_TTL_MS).toBe(60_000);
+    mkdirSync(join(dir, "inject"), { recursive: true, mode: 0o755 });
+    const handle = writeInjectFile(dir, { secretId: "i", secretName: "K", value: "v-123456" });
+    const ttl = Date.parse(handle.expiresAt) - Date.now();
+    expect(ttl).toBeLessThanOrEqual(60_000);
+    if (process.platform !== "win32") {
+      expect(statSync(join(dir, "inject")).mode & 0o777).toBe(0o700);
+      expect(statSync(handle.envFile).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("scheduleInjectCleanup deletes the file when it expires", () => {
+    vi.useFakeTimers();
+    try {
+      const { dir } = tmpVault();
+      const handle = writeInjectFile(dir, { secretId: "i", secretName: "K", value: "v-123456", ttlMs: 1000 });
+      let cleared = false;
+      scheduleInjectCleanup(handle.envFile, handle.expiresAt, Date.now(), () => (cleared = true));
+      vi.advanceTimersByTime(999);
+      expect(existsSync(handle.envFile)).toBe(true);
+      vi.advanceTimersByTime(2);
+      expect(existsSync(handle.envFile)).toBe(false);
+      expect(cleared).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("scheduleInjectCleanup can be cancelled", () => {
+    vi.useFakeTimers();
+    try {
+      const { dir } = tmpVault();
+      const handle = writeInjectFile(dir, { secretId: "i", secretName: "K", value: "v-123456", ttlMs: 1000 });
+      const cancel = scheduleInjectCleanup(handle.envFile, handle.expiresAt);
+      cancel();
+      vi.advanceTimersByTime(5000);
+      expect(existsSync(handle.envFile)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clearExpiredInjectFiles falls back to mtime for files without a header", () => {
+    const { dir } = tmpVault();
+    const inject = join(dir, "inject");
+    mkdirSync(inject, { recursive: true });
+    const stale = join(inject, "stale.env");
+    const fresh = join(inject, "fresh.env");
+    writeFileSync(stale, "SECRET='x'\n", { mode: 0o600 });
+    writeFileSync(fresh, "SECRET='y'\n", { mode: 0o600 });
+    const old = (Date.now() - 2 * DEFAULT_INJECT_TTL_MS) / 1000;
+    utimesSync(stale, old, old);
+    expect(clearExpiredInjectFiles(dir)).toBe(1);
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
   });
 });
