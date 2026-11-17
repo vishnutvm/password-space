@@ -18870,7 +18870,7 @@ var require_dist = __commonJS({
 });
 
 // packages/mcp-server/src/index.ts
-import { readFileSync as readFileSync3, existsSync as existsSync5 } from "node:fs";
+import { readFileSync as readFileSync3, existsSync as existsSync6 } from "node:fs";
 import { dirname as dirname3, join as join4 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
@@ -28830,17 +28830,322 @@ var VaultError = class extends Error {
 };
 
 // packages/vault/dist/store.js
-import { chmodSync, existsSync as existsSync2, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync as existsSync3, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
-var STORE_VERSION = 1;
+import { randomBytes, randomUUID } from "node:crypto";
+
+// packages/vault/dist/keychain.js
+import { spawnSync } from "node:child_process";
+import { existsSync as existsSync2 } from "node:fs";
+var KEYCHAIN_SERVICE = "password-space";
+var defaultRunner = (cmd, args, input) => {
+  const r2 = spawnSync(cmd, args, {
+    input: input ?? "",
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 3e4
+  });
+  return {
+    status: r2.status,
+    stdout: r2.stdout ?? "",
+    stderr: r2.stderr ?? "",
+    error: r2.error
+  };
+};
+function fail(op, kind, r2) {
+  const detail = (r2.error?.message ?? r2.stderr ?? "").trim().split("\n")[0] || `exit ${r2.status}`;
+  throw new VaultError(`${kind}: ${op} failed (${detail})`, "KEYCHAIN");
+}
+function safeLabel(label) {
+  return label.replace(/[^A-Za-z0-9_.:@+-]/g, "_").slice(0, 120) || "secret";
+}
+function assertSafeAccount(account) {
+  if (!/^[A-Za-z0-9_.:/@+-]{1,200}$/.test(account)) {
+    throw new VaultError(`Invalid keychain account name: ${account}`, "INVALID");
+  }
+}
+var MAC_B64_PREFIX = "b64:";
+function encodeMacValue(value) {
+  if (/^[\x20-\x7e]*$/.test(value) && !value.startsWith(MAC_B64_PREFIX))
+    return value;
+  return MAC_B64_PREFIX + Buffer.from(value, "utf8").toString("base64");
+}
+function decodeMacValue(stored) {
+  if (stored.startsWith(MAC_B64_PREFIX)) {
+    return Buffer.from(stored.slice(MAC_B64_PREFIX.length), "base64").toString("utf8");
+  }
+  return stored;
+}
+var MacKeychain = class {
+  run;
+  keychainPath;
+  bin;
+  kind = "macos-keychain";
+  description;
+  constructor(run = defaultRunner, keychainPath = process.env.PASSWORD_SPACE_MACOS_KEYCHAIN?.trim() || void 0, bin = "/usr/bin/security") {
+    this.run = run;
+    this.keychainPath = keychainPath;
+    this.bin = bin;
+    this.description = keychainPath ? `macOS Keychain (${keychainPath})` : "macOS Keychain";
+  }
+  kc() {
+    return this.keychainPath ? [this.keychainPath] : [];
+  }
+  get(account) {
+    assertSafeAccount(account);
+    const r2 = this.run(this.bin, [
+      "find-generic-password",
+      "-s",
+      KEYCHAIN_SERVICE,
+      "-a",
+      account,
+      "-w",
+      ...this.kc()
+    ]);
+    if (r2.status === 44)
+      return null;
+    if (r2.status !== 0)
+      fail("read", this.description, r2);
+    return decodeMacValue(r2.stdout.replace(/\n$/, ""));
+  }
+  set(account, value, label) {
+    assertSafeAccount(account);
+    const hex = Buffer.from(encodeMacValue(value), "utf8").toString("hex");
+    const kc = this.keychainPath ? ` ${this.keychainPath}` : "";
+    if (/\s/.test(kc.trim())) {
+      throw new VaultError("PASSWORD_SPACE_MACOS_KEYCHAIN must not contain spaces", "INVALID");
+    }
+    const line = `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${account} -l ${safeLabel(label)} -X ${hex}${kc}
+`;
+    const r2 = this.run(this.bin, ["-i"], line);
+    if (r2.status !== 0 || r2.stderr.trim())
+      fail("write", this.description, r2);
+  }
+  delete(account) {
+    assertSafeAccount(account);
+    const r2 = this.run(this.bin, [
+      "delete-generic-password",
+      "-s",
+      KEYCHAIN_SERVICE,
+      "-a",
+      account,
+      ...this.kc()
+    ]);
+    if (r2.status === 0 || r2.status === 44)
+      return;
+    fail("delete", this.description, r2);
+  }
+};
+var LinuxSecretService = class {
+  run;
+  bin;
+  kind = "linux-secret-service";
+  description = "Secret Service (libsecret)";
+  constructor(run = defaultRunner, bin = "secret-tool") {
+    this.run = run;
+    this.bin = bin;
+  }
+  get(account) {
+    assertSafeAccount(account);
+    const r2 = this.run(this.bin, ["lookup", "service", KEYCHAIN_SERVICE, "account", account]);
+    if (r2.status === 0)
+      return r2.stdout;
+    if (r2.status === 1 && !r2.stderr.trim() && !r2.error)
+      return null;
+    fail("read", this.description, r2);
+  }
+  set(account, value, label) {
+    assertSafeAccount(account);
+    const r2 = this.run(this.bin, ["store", `--label=${safeLabel(label)}`, "service", KEYCHAIN_SERVICE, "account", account], value);
+    if (r2.status !== 0)
+      fail("write", this.description, r2);
+  }
+  delete(account) {
+    assertSafeAccount(account);
+    const r2 = this.run(this.bin, ["clear", "service", KEYCHAIN_SERVICE, "account", account]);
+    if (r2.status === 0 || r2.status === 1 && !r2.stderr.trim() && !r2.error)
+      return;
+    fail("delete", this.description, r2);
+  }
+};
+var WINDOWS_MAX_BLOB_BYTES = 2560;
+var WINDOWS_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+$src = @"
+using System;
+using System.Runtime.InteropServices;
+public static class PsCred {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public int Flags; public int Type; public string TargetName; public string Comment;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+    public int CredentialBlobSize; public IntPtr CredentialBlob; public int Persist;
+    public int AttributeCount; public IntPtr Attributes; public string TargetAlias; public string UserName;
+  }
+  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool CredReadW(string target, int type, int flags, out IntPtr cred);
+  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool CredWriteW(ref CREDENTIAL cred, int flags);
+  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool CredDeleteW(string target, int type, int flags);
+  [DllImport("advapi32.dll")]
+  static extern void CredFree(IntPtr p);
+  public static string Read(string target) {
+    IntPtr p;
+    if (!CredReadW(target, 1, 0, out p)) {
+      int e = Marshal.GetLastWin32Error();
+      if (e == 1168) return null;
+      throw new System.ComponentModel.Win32Exception(e);
+    }
+    try {
+      CREDENTIAL c = (CREDENTIAL)Marshal.PtrToStructure(p, typeof(CREDENTIAL));
+      byte[] b = new byte[c.CredentialBlobSize];
+      if (c.CredentialBlobSize > 0) Marshal.Copy(c.CredentialBlob, b, 0, c.CredentialBlobSize);
+      return Convert.ToBase64String(b);
+    } finally { CredFree(p); }
+  }
+  public static void Write(string target, string user, string b64) {
+    byte[] b = Convert.FromBase64String(b64);
+    CREDENTIAL c = new CREDENTIAL();
+    c.Type = 1; c.TargetName = target; c.UserName = user; c.Persist = 2;
+    c.CredentialBlobSize = b.Length;
+    c.CredentialBlob = Marshal.AllocHGlobal(Math.Max(b.Length, 1));
+    try {
+      if (b.Length > 0) Marshal.Copy(b, 0, c.CredentialBlob, b.Length);
+      if (!CredWriteW(ref c, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    } finally { Marshal.FreeHGlobal(c.CredentialBlob); }
+  }
+  public static void Delete(string target) {
+    if (!CredDeleteW(target, 1, 0)) {
+      int e = Marshal.GetLastWin32Error();
+      if (e != 1168) throw new System.ComponentModel.Win32Exception(e);
+    }
+  }
+}
+"@
+Add-Type -TypeDefinition $src
+$req = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$res = @{ ok = $true; value = $null; error = $null }
+try {
+  switch ($req.op) {
+    'get' { $res.value = [PsCred]::Read($req.target) }
+    'set' { [PsCred]::Write($req.target, $req.user, $req.value) }
+    'delete' { [PsCred]::Delete($req.target) }
+  }
+} catch { $res.ok = $false; $res.error = $_.Exception.Message }
+[Console]::Out.Write((ConvertTo-Json -InputObject $res -Compress))
+`;
+var WindowsCredentialManager = class {
+  run;
+  bin;
+  kind = "windows-credential-manager";
+  description = "Windows Credential Manager";
+  encoded = Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64");
+  constructor(run = defaultRunner, bin = "powershell.exe") {
+    this.run = run;
+    this.bin = bin;
+  }
+  call(op, account, extra = {}) {
+    const input = JSON.stringify({ op, target: `${KEYCHAIN_SERVICE}:${account}`, ...extra });
+    const r2 = this.run(this.bin, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", this.encoded], input);
+    if (r2.status !== 0)
+      fail(op, this.description, r2);
+    let parsed;
+    try {
+      parsed = JSON.parse(r2.stdout.trim());
+    } catch {
+      fail(op, this.description, { ...r2, stderr: "unexpected output" });
+    }
+    if (!parsed.ok)
+      fail(op, this.description, { ...r2, stderr: parsed.error ?? "unknown error" });
+    return parsed;
+  }
+  get(account) {
+    assertSafeAccount(account);
+    const r2 = this.call("get", account);
+    return r2.value == null ? null : Buffer.from(r2.value, "base64").toString("utf8");
+  }
+  set(account, value, label) {
+    assertSafeAccount(account);
+    const bytes = Buffer.from(value, "utf8");
+    if (bytes.length > WINDOWS_MAX_BLOB_BYTES) {
+      throw new VaultError(`Secret is ${bytes.length} bytes; Windows Credential Manager allows at most ${WINDOWS_MAX_BLOB_BYTES}.`, "INVALID");
+    }
+    this.call("set", account, { user: safeLabel(label), value: bytes.toString("base64") });
+  }
+  delete(account) {
+    assertSafeAccount(account);
+    this.call("delete", account);
+  }
+};
+var override;
+function onPath(bin) {
+  const r2 = defaultRunner(process.platform === "win32" ? "where" : "which", [bin]);
+  return r2.status === 0;
+}
+function platformKeychain(platform = process.platform) {
+  if (override !== void 0)
+    return override;
+  if (process.env.PASSWORD_SPACE_KEYCHAIN === "none")
+    return null;
+  if (platform === "darwin") {
+    return existsSync2("/usr/bin/security") ? new MacKeychain() : null;
+  }
+  if (platform === "win32")
+    return new WindowsCredentialManager();
+  if (platform === "linux" || platform === "freebsd" || platform === "openbsd") {
+    return onPath("secret-tool") ? new LinuxSecretService() : null;
+  }
+  return null;
+}
+function probeKeychain(kc) {
+  const account = `probe-${process.pid}-${Date.now()}`;
+  const value = `probe-${Math.random().toString(36).slice(2)}`;
+  try {
+    kc.set(account, value, "password-space-probe");
+    const back = kc.get(account);
+    kc.delete(account);
+    if (back !== value)
+      return { ok: false, reason: `${kc.description}: read-back mismatch` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// packages/vault/dist/guard-core.js
+import { createHmac } from "node:crypto";
+var GUARD_MIN_LENGTH = 6;
+function mac(key, text) {
+  return createHmac("sha256", key).update(text, "utf8").digest("hex").slice(0, 32);
+}
+function guardPrint(key, value) {
+  if (value.length < GUARD_MIN_LENGTH)
+    return void 0;
+  return { len: value.length, mac: mac(key, value) };
+}
+
+// packages/vault/dist/store.js
+var STORE_VERSION = 2;
+function storagePreferenceFromEnv(env = process.env) {
+  const raw = env.PASSWORD_SPACE_STORAGE?.trim().toLowerCase();
+  if (raw === "keychain" || raw === "file")
+    return raw;
+  return "auto";
+}
 var VaultStore = class {
   storePath;
   data = null;
-  constructor(storePath) {
+  keychainOpt;
+  storagePref;
+  fallbackReason = null;
+  constructor(storePath, opts = {}) {
     this.storePath = storePath;
+    this.keychainOpt = opts.keychain;
+    this.storagePref = opts.storage ?? storagePreferenceFromEnv();
     mkdirSync(dirname(storePath), { recursive: true });
-    if (existsSync2(storePath)) {
+    if (existsSync3(storePath)) {
       this.data = this.readFile();
     }
   }
@@ -28848,7 +29153,10 @@ var VaultStore = class {
     this.data = this.isInitialized() ? this.readFile() : null;
   }
   isInitialized() {
-    return existsSync2(this.storePath);
+    return existsSync3(this.storePath);
+  }
+  get backend() {
+    return this.data?.backend ?? null;
   }
   getMeta() {
     if (!this.data)
@@ -28856,25 +29164,91 @@ var VaultStore = class {
     return {
       storeVersion: this.data.version,
       createdAt: this.data.createdAt,
-      storage: "plain-json"
+      storage: this.data.backend
     };
   }
-  /** Ensure the store file exists (setup / first use). */
+  /** The keychain this store would use, without probing it. */
+  keychain() {
+    if (this.keychainOpt === void 0)
+      this.keychainOpt = platformKeychain();
+    return this.keychainOpt;
+  }
+  storageInfo() {
+    const backend = this.data?.backend ?? null;
+    const kc = this.keychain();
+    return {
+      backend,
+      keychain: backend === "keychain" ? kc?.description ?? "unavailable" : null,
+      values_on_disk: backend === "file",
+      fallback_reason: this.fallbackReason,
+      migration_available: backend === "file" && kc !== null
+    };
+  }
+  /** Ensure the store file exists (setup / first use). Picks the backend for a new store. */
   ensure() {
-    if (!this.isInitialized()) {
-      const now = (/* @__PURE__ */ new Date()).toISOString();
-      this.data = { version: STORE_VERSION, createdAt: now, secrets: [] };
-      this.persist();
-      this.audit("init", null, null, "human", "plain-json store created");
-    } else if (!this.data) {
-      this.data = this.readFile();
+    if (this.isInitialized()) {
+      if (!this.data)
+        this.data = this.readFile();
+      return;
     }
+    const backend = this.chooseBackend();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.data = { version: STORE_VERSION, storeId: randomUUID(), createdAt: now, backend, secrets: [] };
+    this.persist();
+    if (backend === "keychain")
+      this.hookKey(true);
+    this.audit("init", null, null, "human", `store created (values in ${backend})`);
+  }
+  chooseBackend() {
+    if (this.storagePref === "file")
+      return "file";
+    const kc = this.keychain();
+    const probe = kc ? probeKeychain(kc) : { ok: false, reason: "no OS keychain found on this machine" };
+    if (probe.ok)
+      return "keychain";
+    if (this.storagePref === "keychain") {
+      throw new VaultError(`PASSWORD_SPACE_STORAGE=keychain but the keychain is not usable: ${probe.reason}`, "KEYCHAIN");
+    }
+    this.fallbackReason = probe.reason;
+    return "file";
   }
   requireReady() {
     if (!this.isInitialized() || !this.data) {
       throw new VaultError("Store not initialized. Run: password-space setup (or set)", "NOT_INITIALIZED");
     }
     return this.data;
+  }
+  requireKeychain() {
+    const kc = this.keychain();
+    if (!kc) {
+      throw new VaultError("This store keeps values in the OS keychain, but no keychain is available here. On Linux, install libsecret-tools and run a Secret Service (e.g. gnome-keyring).", "KEYCHAIN");
+    }
+    return kc;
+  }
+  account(secretId) {
+    return `${this.requireReady().storeId}:${secretId}`;
+  }
+  guardKeyAccount() {
+    return `${this.requireReady().storeId}:guard-key`;
+  }
+  /**
+   * Random key for value fingerprints, kept in the keychain next to the values.
+   * Without it, the fingerprints in secrets.json cannot be brute-forced offline.
+   */
+  hookKey(create) {
+    const kc = this.requireKeychain();
+    const hex = kc.get(this.guardKeyAccount());
+    if (hex)
+      return Buffer.from(hex, "hex");
+    if (!create)
+      return null;
+    const key = randomBytes(32);
+    kc.set(this.guardKeyAccount(), key.toString("hex"), "password-space:guard-key");
+    for (const row of this.requireReady().secrets) {
+      const value = kc.get(this.account(row.id));
+      row.guard = value == null ? void 0 : guardPrint(key, value);
+    }
+    return key;
   }
   rowToMeta(row) {
     return {
@@ -28904,8 +29278,19 @@ var VaultStore = class {
     const row = this.findRow(idOrName);
     if (!row)
       throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
+    const value = this.readValue(row);
     this.audit("get", row.id, row.name, actor, null);
-    return { ...this.rowToMeta(row), value: row.value };
+    return { ...this.rowToMeta(row), value };
+  }
+  readValue(row) {
+    const data = this.requireReady();
+    if (data.backend === "file")
+      return row.value ?? "";
+    const value = this.requireKeychain().get(this.account(row.id));
+    if (value == null) {
+      throw new VaultError(`The value for "${row.name}" is missing from the ${this.requireKeychain().description}. Set it again with: password-space set ${row.name}`, "KEYCHAIN");
+    }
+    return value;
   }
   setSecret(input) {
     this.ensure();
@@ -28920,48 +29305,148 @@ var VaultStore = class {
     const tags = input.tags ?? [];
     const notes = input.notes ?? null;
     const existing = input.id ? this.findRow(input.id) : this.findRow(name);
-    if (existing) {
-      const conflict = data.secrets.find((s) => s.id !== existing.id && s.name.toLowerCase() === name.toLowerCase());
-      if (conflict)
-        throw new VaultError(`Secret name already exists: ${name}`, "DUPLICATE_NAME");
-      existing.name = name;
-      existing.value = input.value;
-      existing.tags = tags;
-      existing.notes = notes;
-      existing.updatedAt = now;
-      this.persist();
-      this.audit("update", existing.id, name, "human", null);
-      return this.getMetadata(existing.id);
-    }
-    const dup = data.secrets.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    const dup = data.secrets.find((s) => s.id !== existing?.id && s.name.toLowerCase() === name.toLowerCase());
     if (dup)
       throw new VaultError(`Secret name already exists: ${name}`, "DUPLICATE_NAME");
-    const id = input.id ?? randomUUID();
-    data.secrets.push({
-      id,
+    const row = existing ?? {
+      id: input.id ?? randomUUID(),
       name,
-      value: input.value,
       tags,
       notes,
       createdAt: now,
       updatedAt: now
-    });
+    };
+    row.name = name;
+    row.tags = tags;
+    row.notes = notes;
+    row.updatedAt = now;
+    this.writeValue(row, input.value);
+    if (!existing)
+      data.secrets.push(row);
     this.persist();
-    this.audit("create", id, name, "human", null);
-    return this.getMetadata(id);
+    this.audit(existing ? "update" : "create", row.id, name, "human", null);
+    return this.getMetadata(row.id);
+  }
+  writeValue(row, value) {
+    const data = this.requireReady();
+    if (data.backend === "file") {
+      row.value = value;
+      delete row.guard;
+      return;
+    }
+    const kc = this.requireKeychain();
+    kc.set(this.account(row.id), value, `password-space:${row.name}`);
+    delete row.value;
+    const key = this.hookKey(true);
+    row.guard = guardPrint(key, value);
   }
   deleteSecret(idOrName) {
     const data = this.requireReady();
     const row = this.findRow(idOrName);
     if (!row)
       throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
+    if (data.backend === "keychain")
+      this.requireKeychain().delete(this.account(row.id));
     data.secrets = data.secrets.filter((s) => s.id !== row.id);
     this.persist();
     this.audit("delete", row.id, row.name, "human", null);
   }
+  /**
+   * Move every value to another backend.
+   *
+   * To the keychain: each value is written, read back and compared before
+   * secrets.json is rewritten without values, so a failure part-way leaves
+   * the file store as it was. To the file: values are copied into
+   * secrets.json first, then removed from the keychain.
+   */
+  migrate(to) {
+    const data = this.requireReady();
+    const from = data.backend;
+    if (from === to)
+      return { moved: 0, from, to };
+    if (to === "keychain") {
+      const kc2 = this.requireKeychain();
+      const probe = probeKeychain(kc2);
+      if (!probe.ok)
+        throw new VaultError(`Keychain not usable: ${probe.reason}`, "KEYCHAIN");
+      const written = [];
+      try {
+        for (const row of data.secrets) {
+          const account = this.account(row.id);
+          const value = row.value ?? "";
+          kc2.set(account, value, `password-space:${row.name}`);
+          written.push(account);
+          if (kc2.get(account) !== value) {
+            throw new VaultError(`Read-back check failed for "${row.name}"`, "KEYCHAIN");
+          }
+        }
+        data.backend = "keychain";
+        const key = this.hookKey(true);
+        for (const row of data.secrets) {
+          row.guard = guardPrint(key, row.value ?? "");
+          delete row.value;
+        }
+      } catch (err) {
+        data.backend = "file";
+        for (const account of written) {
+          try {
+            kc2.delete(account);
+          } catch {
+          }
+        }
+        this.data = this.readFile();
+        throw err;
+      }
+      this.persist();
+      this.audit("migrate", null, null, "human", `values moved to ${kc2.description}`);
+      return { moved: data.secrets.length, from, to };
+    }
+    const kc = this.requireKeychain();
+    for (const row of data.secrets) {
+      row.value = this.readValue(row);
+      delete row.guard;
+    }
+    const accounts = [...data.secrets.map((r2) => this.account(r2.id)), this.guardKeyAccount()];
+    data.backend = "file";
+    this.persist();
+    for (const account of accounts) {
+      try {
+        kc.delete(account);
+      } catch {
+      }
+    }
+    this.audit("migrate", null, null, "human", "values moved to secrets.json (plain text)");
+    return { moved: data.secrets.length, from, to };
+  }
+  /**
+   * Material for prompt hooks: plain values (file backend) or keyed
+   * fingerprints plus the key (keychain backend). Never audited.
+   */
+  guardMaterial() {
+    const data = this.requireReady();
+    if (data.backend === "file") {
+      return {
+        backend: "file",
+        values: data.secrets.map((r2) => ({ name: r2.name, value: r2.value ?? "" }))
+      };
+    }
+    const prints = data.secrets.flatMap((r2) => r2.guard ? [{ name: r2.name, ...r2.guard }] : []);
+    if (prints.length === 0)
+      return { backend: "keychain", key: null, prints };
+    try {
+      return { backend: "keychain", key: this.hookKey(false), prints };
+    } catch (err) {
+      return {
+        backend: "keychain",
+        key: null,
+        prints,
+        error: err instanceof Error ? err.message : String(err)
+      };
+    }
+  }
   listAudit(limit = 50) {
     const logPath = auditLogPath(dirname(this.storePath));
-    if (!existsSync2(logPath))
+    if (!existsSync3(logPath))
       return [];
     const lines = readFileSync(logPath, "utf8").split("\n").filter(Boolean);
     const events = [];
@@ -28986,18 +29471,29 @@ var VaultStore = class {
     if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.secrets)) {
       throw new VaultError("Store file corrupt", "INVALID");
     }
+    const backend = parsed.backend === "keychain" ? "keychain" : "file";
     return {
-      version: Number(parsed.version) || STORE_VERSION,
+      version: STORE_VERSION,
+      storeId: typeof parsed.storeId === "string" && parsed.storeId ? parsed.storeId : randomUUID(),
       createdAt: parsed.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
-      secrets: parsed.secrets.map((s) => ({
-        id: String(s.id),
-        name: String(s.name),
-        value: String(s.value ?? ""),
-        tags: Array.isArray(s.tags) ? s.tags.map(String) : [],
-        notes: s.notes == null ? null : String(s.notes),
-        createdAt: String(s.createdAt ?? ""),
-        updatedAt: String(s.updatedAt ?? "")
-      }))
+      backend,
+      secrets: parsed.secrets.map((s) => {
+        const row = {
+          id: String(s.id),
+          name: String(s.name),
+          tags: Array.isArray(s.tags) ? s.tags.map(String) : [],
+          notes: s.notes == null ? null : String(s.notes),
+          createdAt: String(s.createdAt ?? ""),
+          updatedAt: String(s.updatedAt ?? "")
+        };
+        if (backend === "file")
+          row.value = String(s.value ?? "");
+        const g = s.guard;
+        if (backend === "keychain" && g && typeof g.mac === "string" && typeof g.len === "number") {
+          row.guard = { len: g.len, mac: g.mac };
+        }
+        return row;
+      })
     };
   }
   persist() {
@@ -29036,20 +29532,20 @@ var VaultStore = class {
     }
   }
   static exists(storePath) {
-    return existsSync2(storePath);
+    return existsSync3(storePath);
   }
 };
 
 // packages/vault/dist/inject.js
-import { chmodSync as chmodSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync3, readdirSync, readFileSync as readFileSync2 } from "node:fs";
+import { chmodSync as chmodSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync4, readdirSync, readFileSync as readFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes as randomBytes2 } from "node:crypto";
 var DEFAULT_INJECT_TTL_MS = 5 * 60 * 1e3;
 function writeInjectFile(dataDir2, opts) {
   clearExpiredInjectFiles(dataDir2);
   const dir = injectDir(dataDir2);
   mkdirSync2(dir, { recursive: true });
-  const token = randomBytes(16).toString("hex");
+  const token = randomBytes2(16).toString("hex");
   const envVar = opts.envVar ?? sanitizeEnvName(opts.secretName);
   const envFile = join2(dir, `${token}.env`);
   const ttlMs = opts.ttlMs ?? DEFAULT_INJECT_TTL_MS;
@@ -29078,7 +29574,7 @@ function writeInjectFile(dataDir2, opts) {
 }
 function clearExpiredInjectFiles(dataDir2, now = Date.now()) {
   const dir = injectDir(dataDir2);
-  if (!existsSync3(dir))
+  if (!existsSync4(dir))
     return 0;
   let removed = 0;
   for (const name of readdirSync(dir)) {
@@ -29113,7 +29609,7 @@ function openVault(opts = {}) {
 }
 
 // packages/mcp-server/src/tools.ts
-import { existsSync as existsSync4 } from "node:fs";
+import { existsSync as existsSync5 } from "node:fs";
 import { dirname as dirname2, join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 function jsonResult(payload, opts) {
@@ -29138,13 +29634,13 @@ function resolveBundledCliPath() {
   try {
     const here = dirname2(fileURLToPath(import.meta.url));
     const sibling = join3(here, "cli.js");
-    if (existsSync4(sibling)) return sibling;
+    if (existsSync5(sibling)) return sibling;
   } catch {
   }
   const root = process.env.CURSOR_PLUGIN_ROOT?.trim();
   if (root && !root.includes("${")) {
     const fromEnv = join3(root, BUNDLED_CLI_RELATIVE);
-    if (existsSync4(fromEnv)) return fromEnv;
+    if (existsSync5(fromEnv)) return fromEnv;
   }
   return void 0;
 }
@@ -29170,7 +29666,20 @@ var NodeVersionError = class extends Error {
     this.required = `>=${requiredMajor}`;
   }
 };
-var TRUST_LINE = "Secrets live as local plain files on this device. Name them in Terminal; never paste values into chat.";
+var TRUST_LINE = "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal; never paste values into chat.";
+function storageFields(store) {
+  const info = store.storageInfo();
+  return {
+    storage: info.backend,
+    values: info,
+    ...info.migration_available ? {
+      migrate_command: bundledCliCommand("migrate"),
+      migrate_note: "Values are in plain text in secrets.json and this machine has an OS keychain. Suggest the user run migrate_command in Terminal."
+    } : {},
+    run_command: bundledCliCommand("run -s <SECRET_NAME> -- <command>"),
+    run_note: "Preferred way for agents to use a secret: run the command through the CLI so the value goes straight into the child process env and is redacted from its output."
+  };
+}
 var MIN_NODE_MAJOR = 20;
 function checkPrerequisites(nodeVersion = process.version) {
   const match = /^v(\d+)\./.exec(nodeVersion);
@@ -29277,7 +29786,7 @@ function buildOnboardingSteps(initialized, _unlocked = true, _session = true) {
       title: "Ensure local store",
       done: initialized,
       tool: "cli_setup",
-      user_action: initialized ? void 0 : `Run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` \u2014 creates ~/.password-space/secrets.json (plain text). No passphrase.`
+      user_action: initialized ? void 0 : `Run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` \u2014 creates ~/.password-space (values go to the OS keychain). No passphrase.`
     },
     {
       id: "store",
@@ -29292,8 +29801,8 @@ function buildOnboardingSteps(initialized, _unlocked = true, _session = true) {
       phase: "2/2",
       title: "Use with your agent",
       done: false,
-      tool: "inject_secret",
-      user_action: "Ask the agent to use the secret by name \u2014 inject_secret, never paste the value."
+      tool: "run_command",
+      user_action: "Ask the agent to use the secret by name \u2014 it runs commands via the CLI `run -s NAME -- <command>`, never pastes the value."
     }
   ];
 }
@@ -29312,7 +29821,7 @@ function recoveryGuidance(opts) {
     case "needs_init":
       return {
         code: opts.legacyEncrypted ? "legacy_encrypted_vault" : "store_missing",
-        howToFix: opts.legacyEncrypted ? `Legacy encrypted vault.db detected (left untouched). Create the new plain store with \`${CLI_SETUP_COMMANDS.plugin_setup}\`, then re-add secrets with set.` : `Create the local store in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` \u2014 no passphrase, no unlock.`,
+        howToFix: opts.legacyEncrypted ? `Legacy encrypted vault.db detected (left untouched). Create the new store with \`${CLI_SETUP_COMMANDS.plugin_setup}\`, then re-add secrets with set.` : `Create the local store in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` \u2014 no passphrase, no unlock.`,
         what_to_do: [
           `Run: ${bundledCliCommand("setup")}`,
           `Then: ${bundledCliCommand("set")}`,
@@ -29326,7 +29835,7 @@ function recoveryGuidance(opts) {
         howToFix: `Store is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
         what_to_do: [
           `Run: ${bundledCliCommand("set")}`,
-          "Then list_secrets / inject_secret via MCP (no values in chat)."
+          "Then list_secrets via MCP, and `run -s NAME -- <command>` to use a secret (no values in chat)."
         ]
       };
   }
@@ -29335,7 +29844,7 @@ function vaultOnboardTool(store, dataDir2) {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
   const storePath = secretsStorePath(dataDir2);
-  const storeExists = existsSync4(storePath);
+  const storeExists = existsSync5(storePath);
   const legacyEncrypted = hasLegacyEncryptedVault(dataDir2);
   const setup_state = resolveSetupState({
     prereqOk: prereq.ok,
@@ -29351,7 +29860,7 @@ function vaultOnboardTool(store, dataDir2) {
     legacyEncrypted
   });
   const progress = onboardingProgress(initialized);
-  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? legacyEncrypted ? "Welcome. A legacy encrypted vault.db was found (untouched). Create the new plain store in Terminal, then re-add secrets." : "Welcome to Password Space. Next: open Terminal and run setup, then set \u2014 no passphrase or unlock." : "Store ready. Add named secrets in Terminal; agents use inject_secret by name.";
+  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? legacyEncrypted ? "Welcome. A legacy encrypted vault.db was found (untouched). Create the new store in Terminal, then re-add secrets." : "Welcome to Password Space. Next: open Terminal and run setup, then set \u2014 no passphrase or unlock." : "Store ready. Add named secrets in Terminal; agents use them by name via the CLI run command.";
   return jsonResult({
     ok: prereq.ok,
     setup_state,
@@ -29360,7 +29869,7 @@ function vaultOnboardTool(store, dataDir2) {
     db_path: storePath,
     db_exists: storeExists,
     store_exists: storeExists,
-    storage: "plain-json",
+    ...storageFields(store),
     lock_unlock_needed: false,
     legacy_encrypted_vault: legacyEncrypted,
     legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir2) : null,
@@ -29393,7 +29902,7 @@ function vaultStatusTool(store, dataDir2) {
   const prereq = checkPrerequisites();
   const initialized = store.isInitialized();
   const storePath = secretsStorePath(dataDir2);
-  const storeExists = existsSync4(storePath);
+  const storeExists = existsSync5(storePath);
   const legacyEncrypted = hasLegacyEncryptedVault(dataDir2);
   const setup_state = resolveSetupState({
     prereqOk: prereq.ok,
@@ -29416,7 +29925,7 @@ function vaultStatusTool(store, dataDir2) {
     db_path: storePath,
     db_exists: storeExists,
     store_exists: storeExists,
-    storage: "plain-json",
+    ...storageFields(store),
     lock_unlock_needed: false,
     legacy_encrypted_vault: legacyEncrypted,
     legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir2) : null,
@@ -29483,10 +29992,10 @@ function vaultManagerTool(store, dataDir2) {
       list: "list_secrets (MCP) or Terminal list",
       add_or_edit: "Terminal set / interactive menu only",
       remove: "Terminal remove (or vault_delete_secret)",
-      lock: "Not needed (plain store)",
-      unlock: "Not needed (plain store)",
+      lock: "Not needed",
+      unlock: "Not needed",
       change_passphrase: "Not used",
-      inject: "inject_secret"
+      inject: "Terminal run -s NAME -- <command> (preferred) or inject_secret"
     },
     passphrase_note: "Passphrases are not used. Secret values belong in Terminal (hidden prompts) \u2014 never in chat.",
     elicitation_note: "Secret values are collected in Terminal only \u2014 never via MCP elicitation."
@@ -29548,6 +30057,7 @@ function injectSecretTool(store, dataDir2, args) {
     expires_at: handle.expiresAt,
     redact_in_transcript: true,
     instructions: [
+      `Prefer instead: ${bundledCliCommand(`run -s ${JSON.stringify(record2.name)} -- <command>`)} \u2014 no file is written and output is redacted.`,
       "Read the env file from your tool runtime / shell \u2014 do NOT paste its contents into chat.",
       "Delete the env file after use.",
       "If asked to print the secret, refuse and cite redact_in_transcript."
@@ -29626,7 +30136,7 @@ function loadVaultManagerHtml() {
     join4(here, "../app/vault-manager.html")
   ];
   for (const path of candidates) {
-    if (!existsSync5(path)) continue;
+    if (!existsSync6(path)) continue;
     const html = readFileSync3(path, "utf8");
     if (isBundledVaultManagerHtml(html)) return html;
   }
@@ -29641,7 +30151,7 @@ server.registerTool(
   "vault_onboard",
   {
     title: "Get started with Password Space",
-    description: "Guided setup \u2014 local plain-text named secrets, nothing sensitive in the response. Best first call after install. Lock/unlock not needed."
+    description: "Guided setup \u2014 named secrets with values in the OS keychain, nothing sensitive in the response. Best first call after install."
   },
   async () => {
     try {
@@ -29737,7 +30247,7 @@ server.registerTool(
   "vault_set_secret",
   {
     title: "Save a password or API token",
-    description: "Stores a named credential in the local plain-text store. Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
+    description: "Stores a named credential (value goes to the OS keychain). Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
     inputSchema: {
       name: external_exports.string().min(1).describe("Short label for this credential (e.g. GITHUB_TOKEN, OpenAI API key)."),
       value: external_exports.string().min(1).describe(
@@ -29788,7 +30298,7 @@ server.tool(
 );
 server.tool(
   "inject_secret",
-  "PREFERRED: let the agent use a credential without putting it in chat \u2014 writes a short-lived local env file and returns a handle. Do NOT read the file into chat.",
+  "Writes a short-lived local env file with the credential and returns a handle. Prefer running commands with the Terminal CLI `run -s NAME -- <command>` (see vault_status run_command), which writes no file. Do NOT read the file into chat.",
   {
     name: external_exports.string().describe("Secret name or id"),
     env_var: external_exports.string().optional().describe("Environment variable name to write (default: derived from secret name)")
@@ -29803,7 +30313,7 @@ server.tool(
 );
 server.tool(
   "resolve_secret",
-  "LAST RESORT: returns plaintext in the tool result. Prefer inject_secret. Requires confirm_redaction=true.",
+  "LAST RESORT: returns plaintext in the tool result. Prefer the CLI run command or inject_secret. Requires confirm_redaction=true.",
   {
     name: external_exports.string().describe("Secret name or id"),
     confirm_redaction: external_exports.boolean().optional().describe("Must be true to acknowledge client will redact transcripts")
