@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Check committed plugin bundles match a fresh build
+        run: |
+          changes="$(git status --porcelain -- plugins/password-space/dist)"
+          if [ -n "$changes" ]; then
+            echo "::error::plugins/password-space/dist is out of date. Run 'pnpm build' and commit the result."
+            echo "$changes"
+            git --no-pager diff --stat -- plugins/password-space/dist
+            exit 1
+          fi
+          echo "Plugin bundles are up to date."
