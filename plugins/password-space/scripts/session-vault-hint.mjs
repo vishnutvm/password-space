@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * sessionStart hook: gentle setup hint when the vault file is missing.
- * Does not read passphrases, secrets, or vault contents.
+ * sessionStart hook: gentle setup hint when the plain store (secrets.json) is missing.
+ * Only checks that the file exists — never reads secrets or store contents.
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -20,8 +20,8 @@ function dataDir() {
 }
 
 function main() {
-  const db = join(dataDir(), "vault.db");
-  if (existsSync(db)) {
+  const store = join(dataDir(), "secrets.json");
+  if (existsSync(store)) {
     console.log(JSON.stringify({ continue: true }));
     return;
   }
@@ -29,7 +29,7 @@ function main() {
     JSON.stringify({
       continue: true,
       additional_context:
-        "Password Space: vault not set up — run /setup-password-space, call vault_onboard, follow primary_action (Terminal: node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup — no clone; choose 1d/1w/until-lock; passphrase hidden). Optional PASSWORD_SPACE_PASSPHRASE in MCP Environment. Never empty {}. Do not use App forms. Do not ask the user to edit mcp.json.",
+        "Password Space: store not set up — run /setup-password-space, call vault_onboard, follow primary_action (Terminal: node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup, then set — no clone, no passphrase, no unlock). Never ask for secret values in chat. Do not use App forms. Do not ask the user to edit mcp.json.",
     }),
   );
 }
