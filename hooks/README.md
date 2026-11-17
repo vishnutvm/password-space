@@ -18,6 +18,8 @@ There is **one** redaction implementation: [`plugins/password-space/scripts/reda
 
 Both accept the same flags; later flags override earlier ones.
 
+Claude Code cannot rewrite a prompt, so the Claude Code plugin uses a separate guard, `plugins/password-space/scripts/claude-prompt-guard.mjs`, that **blocks** a prompt containing any stored value (from `secrets.json` and inject files). See [docs/claude-code.md](../docs/claude-code.md).
+
 Cursor’s hooks format evolves; treat the JSON example as a **template**, not a guaranteed schema.
 
 ## `redact.mjs`
