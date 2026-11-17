@@ -1,0 +1,21 @@
+{
+  "name": "password-space-marketplace",
+  "owner": {
+    "name": "Vishnu",
+    "email": "vishnutvm@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Local named secret store for AI agents: secrets via MCP, never in chat.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "password-space",
+      "source": "./plugins/password-space",
+      "description": "Name secrets in Terminal, inject them by name over MCP, never paste them in chat.",
+      "version": "0.1.0",
+      "category": "security",
+      "keywords": ["secrets", "vault", "mcp", "credentials"]
+    }
+  ]
+}
