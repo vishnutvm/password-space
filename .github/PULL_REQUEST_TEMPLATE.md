@@ -13,4 +13,3 @@
 - [ ] Tool results, logs and errors still never include secret values
 - [ ] User-facing change noted under `## [Unreleased]` in `CHANGELOG.md`
 - [ ] README / SECURITY.md updated if behavior or the threat model changed
-- [ ] Plugin Skill and the root `skills/` mirror kept in sync, if either was edited

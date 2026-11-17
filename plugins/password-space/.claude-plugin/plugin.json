@@ -1,7 +1,7 @@
 {
   "name": "password-space",
   "version": "0.2.0",
-  "description": "Local named secret store for AI agents: name secrets in Terminal, inject them by name over MCP, never paste them in chat.",
+  "description": "Local named secret store for AI agents: name secrets in Terminal, use them by name from your agent, never paste them in chat.",
   "author": {
     "name": "Vishnu",
     "email": "vishnutvm@users.noreply.github.com"

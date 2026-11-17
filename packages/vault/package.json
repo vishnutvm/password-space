@@ -2,7 +2,7 @@
   "name": "@password-space/vault",
   "version": "0.2.0",
   "private": true,
-  "description": "Local plain-text named secret store for Password Space",
+  "description": "Named secret store with OS keychain backends for Password Space",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

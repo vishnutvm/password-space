@@ -1,8 +1,8 @@
 # Password Space
 
-**A local named secret store for Cursor** — values in your OS keychain, designed so agents never need your secrets in chat.
+**A local named secret store for AI agents.** Values live in your OS keychain; agents use them by name, never through chat.
 
-[Getting started in 2 minutes](../../docs/onboarding.md)
+This folder is the plugin for Cursor and Claude Code, and the bundle Codex uses. Setup guides: [Cursor](../../docs/cursor.md) · [Claude Code](../../docs/claude-code.md) · [Codex](../../docs/codex.md).
 
 ## What's included
 
@@ -45,12 +45,10 @@ Default store folder: `~/.password-space`. Optional override: a real absolute `P
 | `inject_secret` | No — only when a command can't be wrapped with the CLI `run` |
 | `vault_manager` | No — status-only; **do not** use for add |
 
-`vault_init` / `vault_unlock` / `vault_lock` may still appear for compatibility — they are **not** required.
-
 **Claude Code:** `/plugin marketplace add vishnutvm/password-space`, then `/plugin install password-space@password-space-marketplace`. Hooks and differences from Cursor: [claude-code.md](../../docs/claude-code.md).
 
 **OpenAI Codex:** `node "<this folder>/dist/cli.js" codex-setup --write` registers the MCP server, hooks and skill in `~/.codex/config.toml`. Details: [codex.md](../../docs/codex.md).
 
-More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [plain-text store note](../../docs/onboarding.md). CLI details: [root README](../../README.md).
+More: [root README](../../README.md) · [SECURITY.md](../../SECURITY.md).
 
 MIT
