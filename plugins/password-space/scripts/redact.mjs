@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
  * Cursor hook entry: redact known Password Space secrets from outbound prompts.
- * Defaults to --from-inject --fail-on-leak so chat cannot send known vault values.
+ * Defaults to --from-inject --fail-on-leak so chat cannot send known inject values.
  *
  * Stdin → stdout (Cursor hooks). Exit 3 blocks send when a known secret is present.
+ *
+ * This is the single redaction implementation. hooks/redact.mjs in the repo root
+ * wraps it with opt-in defaults (--no-from-inject --no-fail-on-leak).
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
