@@ -8,7 +8,9 @@ import {
   openVault,
   secretsStorePath,
   vaultDbPath,
+  type StorageInfo,
 } from "@password-space/vault";
+import { parseRunArgs, runWithSecrets, RUN_USAGE } from "./run.js";
 
 type Args = {
   command: string;
@@ -124,18 +126,20 @@ async function promptHidden(question: string): Promise<string> {
 }
 
 function printHelp(): void {
-  console.log(`password-space — local plain-text named secrets (Terminal for humans, MCP for agents)
+  console.log(`password-space — named secrets in your OS keychain (Terminal for humans, MCP for agents)
 
 Usage:
   password-space                 Interactive menu (TTY)
   password-space <command> [options]
 
 Commands:
-  setup | init           Ensure the local store exists (no passphrase)
-  status                 Store status
+  setup | init           Create the store (values go to the OS keychain when available)
+  status                 Store status, including where values are kept
   set | add [name]       Store or update a secret (hidden value)
   remove | delete | rm   Delete a secret (prompts for name)
   list                   List secret names only (no values)
+  run -s NAME -- <cmd>   Run a command with secrets in its environment (see below)
+  migrate [--to file]    Move values into the OS keychain (or back to secrets.json)
   menu | interactive     Full interactive menu
   onboard                Print next Terminal step
   get <name>             Print secret value (human only — not for agents)
@@ -151,12 +155,23 @@ Options:
   --json                 Machine-readable output
   --yes                  Skip confirm prompts where safe
 
-Environment:
-  PASSWORD_SPACE_HOME           Same as --data-dir
+${RUN_USAGE}
 
-Store file:  ~/.password-space/secrets.json  (mode 0600, plain values at rest)
-Agents use MCP inject_secret / list_secrets by name — never paste secrets in chat.
+Environment:
+  PASSWORD_SPACE_HOME      Same as --data-dir
+  PASSWORD_SPACE_STORAGE   auto (default) | keychain | file — backend for a new store
+
+Store: ~/.password-space/secrets.json holds names, tags and notes (mode 0600).
+Values live in the macOS Keychain, Windows Credential Manager or Linux Secret
+Service. Without one, they fall back to secrets.json in plain text.
+Agents use secrets by name (run / inject_secret) — never paste secrets in chat.
 `);
+}
+
+function describeStorage(info: StorageInfo): string {
+  if (info.backend === "keychain") return `OS keychain (${info.keychain})`;
+  if (info.backend === "file") return "secrets.json — plain text on disk (no OS keychain in use)";
+  return "not created";
 }
 
 function storeSnapshot(dataDir: string): {
@@ -164,16 +179,19 @@ function storeSnapshot(dataDir: string): {
   secretCount: number;
   storePath: string;
   legacyEncrypted: boolean;
+  storage: StorageInfo;
 } {
   const store = openVault({ dataDir });
   const initialized = store.isInitialized();
   const secretCount = initialized ? store.listSecrets().length : 0;
+  const storage = store.storageInfo();
   store.close();
   return {
     initialized,
     secretCount,
     storePath: secretsStorePath(dataDir),
     legacyEncrypted: hasLegacyEncryptedVault(dataDir),
+    storage,
   };
 }
 
@@ -185,12 +203,15 @@ It is left untouched. Re-add secrets with \`${selfCmd()} set\` into the new plai
 `);
 }
 
-async function runSetupWizard(dataDir: string): Promise<void> {
+async function runSetupWizard(
+  dataDir: string,
+  flags: Record<string, string | boolean> = {},
+): Promise<void> {
   console.log(`
 Password Space — setup
 ──────────────────────
 • Store home: ${dataDir}
-• Plain local files (secrets.json) — values readable at rest
+• Names and tags: secrets.json · values: your OS keychain
 • No passphrase / unlock session required
 • Name secrets in Terminal; ask the agent to use them by name
 `);
@@ -198,22 +219,65 @@ Password Space — setup
   const store = openVault({ dataDir });
   const wasInit = store.isInitialized();
   store.ensure();
+  const info = store.storageInfo();
+  const count = store.listSecrets().length;
   store.close();
-  if (wasInit) {
-    console.log(`✓ Store already exists at ${secretsStorePath(dataDir)}`);
-  } else {
-    console.log(`✓ Store created at ${secretsStorePath(dataDir)}`);
+  console.log(`${wasInit ? "✓ Store already exists" : "✓ Store created"} at ${secretsStorePath(dataDir)}`);
+  console.log(`  Values: ${describeStorage(info)}`);
+  if (info.fallback_reason) {
+    console.log(`  (No usable keychain: ${info.fallback_reason})`);
+  }
+  if (info.migration_available) {
+    console.log(`
+${count} secret value(s) are stored in plain text in secrets.json, and this machine has a keychain.`);
+    const move =
+      flags.yes || !input.isTTY
+        ? false
+        : /^(y|yes|)$/i.test(await promptVisible("Move them into the OS keychain now? [Y/n]: "));
+    if (move) {
+      await runMigrate(dataDir, { to: "keychain" });
+    } else {
+      console.log(`  Later: ${selfCmd()} migrate`);
+    }
   }
   printLegacyHint(dataDir);
 
   console.log(`
-Next (still in Terminal — never paste values in Cursor chat):
+Next (still in Terminal — never paste values in chat):
   ${selfCmd()} set
   # or: ${selfCmd()}   → interactive menu
 
-Back in Cursor:
-  • vault_status / list_secrets / inject_secret
+Back in your agent:
+  • vault_status / list_secrets
+  • ${selfCmd()} run -s NAME -- <command>   (secret goes into the command's env)
 `);
+}
+
+async function runMigrate(
+  dataDir: string,
+  opts: { to: "keychain" | "file"; json?: boolean },
+): Promise<void> {
+  const store = openVault({ dataDir });
+  if (!store.isInitialized()) {
+    store.close();
+    throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
+  }
+  const result = store.migrate(opts.to);
+  const info = store.storageInfo();
+  store.close();
+  if (opts.json) {
+    console.log(JSON.stringify({ ...result, storage: info }, null, 2));
+    return;
+  }
+  if (result.moved === 0 && result.from === result.to) {
+    console.log(`✓ Values are already in ${describeStorage(info)}.`);
+    return;
+  }
+  console.log(`✓ Moved ${result.moved} value(s): ${result.from} → ${result.to}.`);
+  console.log(`  Values: ${describeStorage(info)}`);
+  if (opts.to === "keychain") {
+    console.log("  secrets.json now holds names, tags and notes only.");
+  }
 }
 
 async function runStatus(
@@ -225,10 +289,9 @@ async function runStatus(
     dataDir,
     storePath: snap.storePath,
     initialized: snap.initialized,
-    unlocked: true,
     secretCount: snap.secretCount,
-    storage: "plain-json",
-    lock_unlock_needed: false,
+    storage: snap.storage.backend,
+    values: snap.storage,
     legacy_encrypted_db: snap.legacyEncrypted,
     legacy_db_path: snap.legacyEncrypted ? vaultDbPath(dataDir) : null,
   };
@@ -239,8 +302,11 @@ async function runStatus(
   console.log(`data dir:     ${status.dataDir}`);
   console.log(`store:        ${status.storePath}`);
   console.log(`initialized:  ${status.initialized}`);
-  console.log(`storage:      plain-json (no unlock)`);
+  console.log(`values:       ${describeStorage(snap.storage)}`);
   console.log(`secrets:      ${status.secretCount}`);
+  if (snap.storage.migration_available) {
+    console.log(`tip:          ${selfCmd()} migrate   (move values into the OS keychain)`);
+  }
   if (status.legacy_encrypted_db) {
     console.log(`legacy db:    ${status.legacy_db_path} (untouched — re-add via set)`);
   }
@@ -291,7 +357,7 @@ async function runSet(dataDir: string, args: Args): Promise<void> {
     console.log(JSON.stringify(meta, null, 2));
   } else {
     console.log(`✓ Saved ${meta.name} (id ${meta.id})`);
-    console.log("  Value was not printed. In Cursor: list_secrets / inject_secret.");
+    console.log(`  Value was not printed. Agents: ${selfCmd()} run -s ${meta.name} -- <command>`);
   }
 }
 
@@ -370,7 +436,7 @@ async function runInteractiveMenu(
 Password Space
 ──────────────
 Store:  ${dataDir}
-Status: ${snap.initialized ? `ready · ${snap.secretCount} secret(s)` : "not created"} · plain text (no unlock)
+Status: ${snap.initialized ? `ready · ${snap.secretCount} secret(s)` : "not created"} · values: ${describeStorage(snap.storage)}
 
   1) Setup / ensure store
   2) Add secret
@@ -383,7 +449,7 @@ Status: ${snap.initialized ? `ready · ${snap.secretCount} secret(s)` : "not cre
     try {
       switch (choice) {
         case "1":
-          await runSetupWizard(dataDir);
+          await runSetupWizard(dataDir, flags);
           break;
         case "2":
           await runSet(dataDir, { command: "set", positional: [], flags });
@@ -421,7 +487,8 @@ Status: ${snap.initialized ? `ready · ${snap.secretCount} secret(s)` : "not cre
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
-  const dataDir = dataDirFrom(args.flags);
+  // `run` parses its own options: flags after `--` belong to the child command.
+  const dataDir = args.command === "run" ? defaultDataDir() : dataDirFrom(args.flags);
   let command = args.command;
 
   if (!command || command === "menu" || command === "interactive") {
@@ -446,8 +513,22 @@ async function main(): Promise<void> {
 
       case "setup":
       case "init":
-        await runSetupWizard(dataDir);
+        await runSetupWizard(dataDir, args.flags);
         break;
+
+      case "migrate": {
+        const to = args.flags.to ?? "keychain";
+        if (to !== "keychain" && to !== "file") {
+          throw new VaultError("Usage: password-space migrate [--to keychain|file]", "INVALID");
+        }
+        await runMigrate(dataDir, { to, json: Boolean(args.flags.json) });
+        break;
+      }
+
+      case "run": {
+        const code = await runWithSecrets(dataDir, parseRunArgs(process.argv.slice(3)));
+        exit(code);
+      }
 
       case "onboard": {
         const snap = storeSnapshot(dataDir);
@@ -462,7 +543,7 @@ async function main(): Promise<void> {
         }
         console.log('Store ready. Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
         console.log("  Or run without args for the interactive menu.");
-        console.log("  Then in Cursor: vault_status / list_secrets / inject_secret");
+        console.log("  Then in your agent: vault_status / list_secrets, and run -s NAME -- <command>");
         printLegacyHint(dataDir);
         break;
       }
