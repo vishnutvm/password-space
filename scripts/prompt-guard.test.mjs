@@ -68,6 +68,40 @@ test("Claude Code: allows a clean prompt silently", () => {
   assert.equal(r.stdout, "");
 });
 
+test("Codex: --format codex blocks with exit 2 and a reason on stderr", () => {
+  const input = { session_id: "s", turn_id: "t", hook_event_name: "UserPromptSubmit", model: "m", prompt: `token ${VALUE}` };
+  const r = runHook(JSON.stringify(input), ["--format", "codex"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /blocked this prompt.*OPENAI_KEY/);
+  assert.equal(r.stdout, "");
+  assert.ok(!r.stderr.includes(VALUE));
+  assert.equal(runHook(JSON.stringify({ ...input, prompt: "use OPENAI_KEY" }), ["--format", "codex"]).status, 0);
+});
+
+test("SessionStart hint: silent with a store, Codex wording without one", () => {
+  const hint = join(root, "plugins/password-space/scripts/claude-session-hint.mjs");
+  const withStore = spawnSync(process.execPath, [hint, "--host", "codex"], { encoding: "utf8", env: env() });
+  assert.equal(withStore.status, 0);
+  assert.equal(withStore.stdout, "");
+
+  const empty = mkdtempSync(join(tmpdir(), "ps-hint-empty-"));
+  try {
+    const { CLAUDE_PLUGIN_ROOT: _drop, ...rest } = env();
+    const r = spawnSync(process.execPath, [hint, "--host", "codex"], {
+      encoding: "utf8",
+      env: { ...rest, PASSWORD_SPACE_HOME: empty },
+    });
+    assert.equal(r.status, 0);
+    const out = JSON.parse(r.stdout).hookSpecificOutput;
+    assert.equal(out.hookEventName, "SessionStart");
+    assert.match(out.additionalContext, /vault_onboard/);
+    assert.doesNotMatch(out.additionalContext, /\/password-space:setup/);
+    assert.ok(out.additionalContext.includes(join(root, "plugins/password-space/dist/cli.js")));
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
+
 test("text mode for manual checks", () => {
   assert.equal(runHook(`log line ${VALUE}`).status, 2);
   assert.equal(runHook("nothing here").status, 0);

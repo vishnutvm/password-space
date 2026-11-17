@@ -8,7 +8,7 @@ Password Space is a local monorepo with three runtime packages plus Skill/Hook i
 2. **Terminal `set` / `remove`** — human path to add or delete named secrets (hidden value prompts).
 3. **MCP (bundled plugin)** — list metadata, report storage and the exact `run` command; `inject_secret` by name.
 4. **Agent path** — `cli.js run -s NAME -- <command>` puts values into the child process env and redacts them from its output. `inject_secret` (fallback) writes `inject/<token>.env`; tool JSON returns handle + path, never the value.
-5. **Prompt hooks** — `scripts/prompt-guard.mjs` (bundled `dist/guard.js`) blocks Cursor / Claude Code prompts that contain any stored value, matching keychain values by keyed fingerprint.
+5. **Prompt hooks** — `scripts/prompt-guard.mjs` (bundled `dist/guard.js`) blocks Cursor / Claude Code / Codex prompts that contain any stored value, matching keychain values by keyed fingerprint.
 6. **Vault Manager** — optional status-only MCP App; not used for add/remove.
 7. **Lock / unlock** — removed; there is no passphrase.
 

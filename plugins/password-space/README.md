@@ -49,6 +49,8 @@ Default store folder: `~/.password-space`. Optional override: a real absolute `P
 
 **Claude Code:** `/plugin marketplace add vishnutvm/password-space`, then `/plugin install password-space@password-space-marketplace`. Hooks and differences from Cursor: [claude-code.md](../../docs/claude-code.md).
 
+**OpenAI Codex:** `node "<this folder>/dist/cli.js" codex-setup --write` registers the MCP server, hooks and skill in `~/.codex/config.toml`. Details: [codex.md](../../docs/codex.md).
+
 More: [EXTERNAL_USER_INSTALL.md](../../docs/EXTERNAL_USER_INSTALL.md) · [plain-text store note](../../docs/onboarding.md). CLI details: [root README](../../README.md).
 
 MIT

@@ -25,7 +25,7 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
 | Day-1 Terminal + MCP | Terminal `setup` / `set` for secrets; MCP `vault_status`, `list_secrets`, `inject_secret` |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
-| Prompt hook | Cursor and Claude Code hooks block outbound prompts that contain **any stored** secret value |
+| Prompt hook | Cursor, Claude Code and Codex hooks block outbound prompts that contain **any stored** secret value |
 | `run` command | `password-space run -s NAME -- <cmd>` passes secrets in the command's env and redacts them from its output |
 | Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
@@ -41,7 +41,7 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 | --- | --- |
 | At rest | Values in the OS keychain (service `password-space`). `secrets.json` (mode `0600`) has names, tags, notes and keyed fingerprints. File fallback: values in `secrets.json` |
 | Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, dir `0700`, file `0600`, default TTL **60 seconds**, deleted at expiry and when the MCP server exits |
-| Prompt hooks | Cursor and Claude Code prompts that contain **any stored value** are blocked (values of 6+ characters) |
+| Prompt hooks | Cursor, Claude Code and Codex prompts that contain **any stored value** are blocked (values of 6+ characters) |
 | `run` output | Values are replaced with `[REDACTED]` in the command's output when it is not a terminal |
 
 Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/architecture.md](./docs/architecture.md)**.
@@ -53,6 +53,7 @@ Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/archi
 | Node.js | **≥ 20** — required to run the bundled MCP |
 | Cursor plugin | Cursor with marketplace / MCP support |
 | Claude Code plugin | Claude Code with plugin support — see [docs/claude-code.md](./docs/claude-code.md) |
+| OpenAI Codex | Codex CLI or IDE extension, registered in `~/.codex/config.toml` — see [docs/codex.md](./docs/codex.md) |
 | Package manager | **pnpm** 9.x — **optional**; only for developing this repo |
 | OS | Developed and verified on **macOS**; Linux/Windows best-effort |
 
@@ -92,6 +93,17 @@ Layout: `.cursor-plugin/marketplace.json` → `plugins/password-space/` (ships `
 ```
 
 Restart Claude Code, then run `/password-space:setup-password-space`. Hooks, what differs from Cursor, and manual setup: **[docs/claude-code.md](./docs/claude-code.md)**.
+
+## Quickstart (OpenAI Codex)
+
+Codex has no Password Space plugin package yet; one command registers the bundled MCP server, hooks and skill:
+
+```bash
+git clone --depth 1 https://github.com/vishnutvm/password-space ~/password-space   # or reuse an installed plugin folder
+node ~/password-space/plugins/password-space/dist/cli.js codex-setup --write
+```
+
+Restart Codex, check `/mcp`, and trust the hooks with `/hooks`. Config block, what carries over and how agents use secrets there: **[docs/codex.md](./docs/codex.md)**.
 
 ## CLI (setup / add / remove — primary path)
 
@@ -313,7 +325,7 @@ pnpm install && pnpm build && pnpm test
 | `packages/vault` | Store, OS keychain backends, prompt guard, inject, redact |
 | `packages/cli` | Human Terminal CLI, published to npm as `password-space` |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
-| `plugins/password-space` | Cursor and Claude Code plugin (bundled MCP + CLI + skill + hooks + logo) |
+| `plugins/password-space` | Cursor and Claude Code plugin, also used by Codex via `codex-setup` (bundled MCP + CLI + skill + hooks + logo) |
 | `hooks/` | Portable redaction wrapper (same code as the plugin hook, opt-in defaults) |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Changes: [CHANGELOG.md](./CHANGELOG.md). Releases: [docs/RELEASING.md](./docs/RELEASING.md). License: [MIT](./LICENSE).

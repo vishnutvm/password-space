@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 // packages/cli/src/index.ts
+import { join as join3 } from "node:path";
 import { createInterface } from "node:readline";
 import { stdin as input, stdout as output, exit } from "node:process";
 
@@ -917,7 +918,7 @@ ${RUN_USAGE}`, "INVALID");
   const redact = opts.redact ?? !process.stdout.isTTY;
   const isWindows = process.platform === "win32";
   const [cmd, ...args] = isWindows ? opts.command.map(quoteWindowsArg) : opts.command;
-  return await new Promise((resolve) => {
+  return await new Promise((resolve2) => {
     const child = spawn(cmd, args, {
       env: { ...process.env, ...secretEnv },
       stdio: redact ? ["inherit", "pipe", "pipe"] : "inherit",
@@ -940,7 +941,7 @@ ${RUN_USAGE}`, "INVALID");
       console.error(
         e.code === "ENOENT" ? `password-space run: command not found: ${cmd}` : `password-space run: ${e.message}`
       );
-      resolve(127);
+      resolve2(127);
     });
     child.on("close", (code, signal) => {
       process.off("SIGINT", onInt);
@@ -949,12 +950,138 @@ ${RUN_USAGE}`, "INVALID");
       err?.end();
       if (signal) {
         const n = { SIGINT: 2, SIGTERM: 15, SIGKILL: 9, SIGHUP: 1 }[signal] ?? 1;
-        resolve(128 + n);
+        resolve2(128 + n);
       } else {
-        resolve(code ?? 1);
+        resolve2(code ?? 1);
       }
     });
   });
+}
+
+// packages/cli/src/codex.ts
+import { appendFileSync, copyFileSync, existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname2, join as join2, resolve } from "node:path";
+var CODEX_SETUP_USAGE = `Register Password Space with OpenAI Codex:
+  password-space codex-setup              Print the config.toml block (changes nothing)
+  password-space codex-setup --write      Append it to ~/.codex/config.toml (never edits existing lines)
+
+  --no-hooks             Leave out the SessionStart hint and the prompt guard hook
+  --no-skill             With --write: do not copy the skill to ~/.agents/skills/password-space
+  --plugin-root <dir>    Plugin folder that holds dist/index.js (default: next to this CLI)
+  --codex-home <dir>     Codex home (default: $CODEX_HOME or ~/.codex)`;
+var REQUIRED = ["dist/index.js", "dist/cli.js", "scripts/prompt-guard.mjs"];
+function isPluginRoot(dir) {
+  return REQUIRED.every((f) => existsSync4(join2(dir, f)));
+}
+function resolvePluginRoot(cliFile, override2) {
+  if (override2) {
+    const dir = resolve(override2);
+    if (!isPluginRoot(dir)) {
+      throw new VaultError(`${dir} is not a Password Space plugin folder (needs ${REQUIRED.join(", ")})`, "INVALID");
+    }
+    return dir;
+  }
+  const here = dirname2(resolve(cliFile));
+  const candidates = [dirname2(here), resolve(here, "../../../plugins/password-space")];
+  const found = candidates.find(isPluginRoot);
+  if (!found) {
+    throw new VaultError(
+      `Could not find the plugin folder next to ${cliFile}. Run the bundled CLI (plugins/password-space/dist/cli.js) or pass --plugin-root.`,
+      "INVALID"
+    );
+  }
+  return found;
+}
+function codexHome(env = process.env) {
+  const raw = env.CODEX_HOME?.trim();
+  return raw ? resolve(raw) : join2(homedir2(), ".codex");
+}
+function tomlString(s) {
+  return JSON.stringify(s);
+}
+function shellPath(p) {
+  if (p.includes('"')) throw new VaultError(`Path contains a double quote: ${p}`, "INVALID");
+  return `"${p}"`;
+}
+function codexConfigSnippet(opts) {
+  const root = opts.pluginRoot;
+  const lines = [
+    "# Password Space: MCP server (tools: vault_status, list_secrets, inject_secret, \u2026)",
+    "[mcp_servers.password-space]",
+    `command = "node"`,
+    `args = [${tomlString(join2(root, "dist", "index.js"))}]`
+  ];
+  if (opts.dataDir) {
+    lines.push("", "[mcp_servers.password-space.env]", `PASSWORD_SPACE_HOME = ${tomlString(opts.dataDir)}`);
+  }
+  if (opts.hooks) {
+    const hint = `node ${shellPath(join2(root, "scripts", "claude-session-hint.mjs"))} --host codex`;
+    const guard = `node ${shellPath(join2(root, "scripts", "prompt-guard.mjs"))} --format codex`;
+    lines.push(
+      "",
+      "# Password Space: setup hint at session start, and block prompts that contain a stored value.",
+      "# Codex runs new hooks only after you trust them with /hooks.",
+      "[[hooks.SessionStart]]",
+      `matcher = "startup"`,
+      "",
+      "[[hooks.SessionStart.hooks]]",
+      `type = "command"`,
+      `command = ${tomlString(hint)}`,
+      "timeout = 10",
+      "",
+      "[[hooks.UserPromptSubmit]]",
+      "",
+      "[[hooks.UserPromptSubmit.hooks]]",
+      `type = "command"`,
+      `command = ${tomlString(guard)}`,
+      "timeout = 10"
+    );
+  }
+  return `${lines.join("\n")}
+`;
+}
+function inspectCodexConfig(text) {
+  const hasServer = /^\s*\[\s*mcp_servers\s*\.\s*(?:password-space|"password-space"|'password-space')\s*\]/m.test(text);
+  const hasHooks = /prompt-guard\.mjs/.test(text);
+  const inline = /^\s*(mcp_servers|hooks)\s*=/m.exec(text);
+  return { hasServer, hasHooks, ...inline ? { inlineConflict: inline[1] } : {} };
+}
+function writeCodexConfig(opts) {
+  const configPath = join2(opts.codexHome, "config.toml");
+  const current = existsSync4(configPath) ? readFileSync2(configPath, "utf8") : "";
+  const found = inspectCodexConfig(current);
+  if (found.inlineConflict) {
+    throw new VaultError(
+      `${configPath} sets \`${found.inlineConflict} = \u2026\` inline, so tables cannot be appended safely. Add the block from \`password-space codex-setup\` by hand.`,
+      "INVALID"
+    );
+  }
+  const addServer = !found.hasServer;
+  const addHooks = opts.hooks && !found.hasHooks;
+  let wrote = "nothing";
+  if (addServer || addHooks) {
+    let block = codexConfigSnippet({ ...opts, hooks: addHooks });
+    if (!addServer) block = block.slice(block.indexOf("\n# Password Space: setup hint") + 1);
+    mkdirSync2(opts.codexHome, { recursive: true });
+    const sep = current === "" ? "" : current.endsWith("\n") ? "\n" : "\n\n";
+    appendFileSync(configPath, sep + block, { mode: 384 });
+    wrote = addServer && (addHooks || !opts.hooks) ? "all" : addServer ? "server" : "hooks";
+  }
+  let skill = "skipped";
+  let skillPath;
+  if (opts.skill) {
+    const src = join2(opts.pluginRoot, "skills", "password-space", "SKILL.md");
+    skillPath = join2(opts.home ?? homedir2(), ".agents", "skills", "password-space", "SKILL.md");
+    if (existsSync4(skillPath)) {
+      skill = "exists";
+    } else if (existsSync4(src)) {
+      mkdirSync2(dirname2(skillPath), { recursive: true });
+      copyFileSync(src, skillPath);
+      skill = "copied";
+    }
+  }
+  return { configPath, wrote, skill, ...skillPath ? { skillPath } : {} };
 }
 
 // packages/cli/src/index.ts
@@ -998,34 +1125,34 @@ function selfCmd() {
 async function promptVisible(question) {
   if (!input.isTTY) {
     const rl2 = createInterface({ input, output: void 0, terminal: false });
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       rl2.once("line", (line) => {
         rl2.close();
-        resolve(line.trim());
+        resolve2(line.trim());
       });
       rl2.once("close", () => reject(new Error("No input on stdin")));
     });
   }
   const rl = createInterface({ input, output, terminal: true });
-  return new Promise((resolve) => {
+  return new Promise((resolve2) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve(answer.trim());
+      resolve2(answer.trim());
     });
   });
 }
 async function promptHidden(question) {
   if (!input.isTTY) {
     const rl = createInterface({ input, output: void 0, terminal: false });
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       rl.once("line", (line) => {
         rl.close();
-        resolve(line);
+        resolve2(line);
       });
       rl.once("close", () => reject(new Error("No value on stdin")));
     });
   }
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve2, reject) => {
     output.write(question);
     const wasRaw = input.isRaw;
     input.setRawMode?.(true);
@@ -1036,7 +1163,7 @@ async function promptHidden(question) {
         if (ch === "\n" || ch === "\r" || ch === "") {
           cleanup();
           output.write("\n");
-          resolve(buf);
+          resolve2(buf);
           return;
         }
         if (ch === "") {
@@ -1074,6 +1201,7 @@ Commands:
   list                   List secret names only (no values)
   run -s NAME -- <cmd>   Run a command with secrets in its environment (see below)
   migrate [--to file]    Move values into the OS keychain (or back to secrets.json)
+  codex-setup [--write]  Print (or append) the ~/.codex/config.toml block for OpenAI Codex
   menu | interactive     Full interactive menu
   onboard                Print next Terminal step
   get <name>             Show a value (interactive terminal only, asks first)
@@ -1090,6 +1218,8 @@ Options:
   --yes                  Skip confirm prompts where safe
 
 ${RUN_USAGE}
+
+${CODEX_SETUP_USAGE}
 
 Environment:
   PASSWORD_SPACE_HOME      Same as --data-dir
@@ -1409,6 +1539,41 @@ Status: ${snap.initialized ? `ready \xB7 ${snap.secretCount} secret(s)` : "not c
     }
   }
 }
+function runCodexSetup(flags) {
+  const str = (k) => typeof flags[k] === "string" ? flags[k] : void 0;
+  const pluginRoot = resolvePluginRoot(process.argv[1] ?? "", str("plugin-root"));
+  const hooks = !flags["no-hooks"];
+  const envHome = process.env.PASSWORD_SPACE_HOME?.trim();
+  const dataDir = envHome && !envHome.includes("${") ? envHome : void 0;
+  const opts = { pluginRoot, hooks, ...dataDir ? { dataDir } : {} };
+  if (!flags.write) {
+    console.log(`# Add to ${join3(codexHome(), "config.toml")} (or run: ${selfCmd()} codex-setup --write)
+`);
+    console.log(codexConfigSnippet(opts));
+    console.log(`# Optional skill: copy ${join3(pluginRoot, "skills", "password-space")} to ~/.agents/skills/password-space`);
+    return;
+  }
+  const home = str("codex-home");
+  const r = writeCodexConfig({ ...opts, codexHome: home ? home : codexHome(), skill: !flags["no-skill"] });
+  const what = {
+    all: hooks ? "MCP server and hooks" : "MCP server",
+    server: "MCP server (hooks were already there)",
+    hooks: "hooks (MCP server was already there)",
+    nothing: "nothing: Password Space is already configured"
+  }[r.wrote];
+  console.log(`Codex config: ${r.configPath}
+  Added: ${what}`);
+  if (r.skill === "copied") console.log(`  Skill: copied to ${r.skillPath}`);
+  if (r.skill === "exists") console.log(`  Skill: ${r.skillPath} already exists (left as is)`);
+  console.log("\nNext:");
+  console.log("  1. Restart Codex. Check with /mcp that password-space is listed.");
+  if (hooks && (r.wrote === "all" || r.wrote === "hooks")) {
+    console.log("  2. Run /hooks in Codex and trust the two Password Space hooks (Codex skips untrusted hooks).");
+  }
+  if (dataDir) {
+    console.log(`  Note: hooks read PASSWORD_SPACE_HOME from the shell that starts Codex. Export it there too.`);
+  }
+}
 async function main() {
   const args = parseArgs(process.argv);
   const dataDir = args.command === "run" ? defaultDataDir() : dataDirFrom(args.flags);
@@ -1446,6 +1611,9 @@ async function main() {
         const code = await runWithSecrets(dataDir, parseRunArgs(process.argv.slice(3)));
         exit(code);
       }
+      case "codex-setup":
+        runCodexSetup(args.flags);
+        break;
       case "onboard": {
         const snap = storeSnapshot(dataDir);
         if (!snap.initialized) {
@@ -1518,10 +1686,10 @@ async function main() {
   }
 }
 function readAllStdin() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve2, reject) => {
     const chunks = [];
     input.on("data", (c) => chunks.push(Buffer.from(c)));
-    input.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    input.on("end", () => resolve2(Buffer.concat(chunks).toString("utf8")));
     input.on("error", reject);
   });
 }

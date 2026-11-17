@@ -54,7 +54,7 @@ run the CLI as you, can request any secret by name.
 
 ### Prompt hooks
 
-The Cursor (`beforeSubmitPrompt`) and Claude Code (`UserPromptSubmit`) hooks
+The Cursor (`beforeSubmitPrompt`), Claude Code and Codex (`UserPromptSubmit`) hooks
 block a prompt that contains any stored value of 6 or more characters, plus
 values in live inject files. They do not see tool output, screenshots, or
 values that were never stored. If the keychain cannot be reached the hook lets
