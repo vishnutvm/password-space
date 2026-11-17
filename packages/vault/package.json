@@ -1,7 +1,7 @@
 {
   "name": "@password-space/vault",
   "version": "0.1.0",
-  "description": "Encrypted local vault core for Password Space",
+  "description": "Local plain-text named secret store for Password Space",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

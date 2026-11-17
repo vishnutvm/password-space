@@ -4,32 +4,23 @@ Password Space is a local monorepo with three runtime packages plus Skill/Hook i
 
 ## Data flow
 
-1. **`vault_init` (MCP) or `password-space init` (CLI)** — generate vault key; wrap with scrypt(passphrase); store salt + wrapped key + empty secrets table in `vault.db`.
-2. **`vault_unlock` / `password-space unlock`** — derive master key; unwrap vault key; write TTL session file (`0600`).
-3. **MCP (bundled plugin) / CLI** — open DB; load session; decrypt secrets in process memory only as needed.
-4. **Store** — `vault_set_secret` (MCP) or CLI `set` encrypts values at rest (metadata-only tool results).
-5. **Agent path** — `inject_secret` writes `inject/<token>.env`; tool JSON returns handle + path, never the value. Expired inject files are cleared on unlock/inject/lock.
-6. **Vault Manager** — optional MCP App (`vault_manager` + `ui://password-space/vault-manager.html`) for interactive CRUD / lock / change-passphrase; progressive JSON fallback.
-7. **Lock** — `vault_lock` / CLI `lock` deletes session; zero in-memory keys on process exit.
+1. **`password-space setup` (CLI) or soft-compat `vault_init` (MCP)** — ensure `secrets.json` exists under `$PASSWORD_SPACE_HOME` (mode `0600`). No passphrase.
+2. **Terminal `set` / `remove`** — human path to add or delete named secrets (hidden value prompts).
+3. **MCP (bundled plugin)** — open the plain store; list metadata; `inject_secret` by name.
+4. **Agent path** — `inject_secret` writes `inject/<token>.env`; tool JSON returns handle + path, never the value.
+5. **Vault Manager** — optional status-only MCP App; not used for add/remove.
+6. **Lock / unlock** — soft-compat no-ops; not part of the product path.
 
-Marketplace installs ship a self-contained MCP bundle (`plugins/password-space/dist/index.js`) so day-1 init/unlock/set does not require cloning the monorepo.
-
-## Key hierarchy
-
-```text
-passphrase
-  └─ scrypt(salt) → master key
-       └─ unwrap → vault key
-            └─ AES-256-GCM → per-secret ciphertext
-```
+Marketplace installs ship a self-contained MCP + CLI bundle (`plugins/password-space/dist/`) so day-1 setup/set does not require cloning the monorepo.
 
 ## Files on disk (`$PASSWORD_SPACE_HOME`, default `~/.password-space`)
 
 | Path | Contents |
 | --- | --- |
-| `vault.db` | SQLite: meta, encrypted secrets, audit (no plaintext values) |
-| `session` | Temporary unlock session (sensitive while present) |
+| `secrets.json` | Plain named secrets + metadata (mode `0600`) |
+| `audit.jsonl` | Optional append-only audit (no values) |
 | `inject/*.env` | Short-lived env files for agent consumption |
+| `vault.db` | Legacy encrypted SQLite (left untouched if present) |
 
 ## Why not return secrets in MCP by default
 

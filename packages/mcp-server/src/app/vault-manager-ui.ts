@@ -1,6 +1,6 @@
 /**
- * MCP Apps Vault Manager view — runs inside the host iframe.
- * Passphrase is collected in this form and sent via callServerTool args (never elicitation).
+ * MCP Apps Vault Manager view — status-only.
+ * Secret add/remove belongs in the Terminal CLI (never App forms).
  */
 import { App } from "@modelcontextprotocol/ext-apps";
 
@@ -9,12 +9,14 @@ type ManagerPayload = {
   status?: {
     initialized?: boolean;
     unlocked?: boolean;
-    session?: boolean;
     setup_state?: string;
     human_summary?: string;
-    primary_action?: { do_this?: string };
+    primary_action?: { do_this?: string; copy_paste_command?: string };
+    storage?: string;
+    lock_unlock_needed?: boolean;
   };
   secrets?: SecretMeta[];
+  apps_fallback?: { copy_paste_command?: string };
 };
 
 function root(): HTMLElement {
@@ -58,10 +60,9 @@ function setStatus(msg: string, kind: "ok" | "err" | "info" = "info"): void {
 function renderShell(): void {
   root().innerHTML = `
     <div class="shell">
-      <h1 id="page-title">Vault</h1>
+      <h1 id="page-title">Password Space</h1>
       <section class="panel" id="auth-panel"></section>
-      <section class="panel" id="secrets-panel" hidden></section>
-      <section class="panel" id="passphrase-panel" hidden></section>
+      <section class="panel" id="secrets-panel"></section>
       <p class="foot" id="status-line"></p>
     </div>
   `;
@@ -85,166 +86,52 @@ async function main(): Promise<void> {
     const title = $("page-title");
     const auth = $("auth-panel");
     const secrets = $("secrets-panel");
-    const passPanel = $("passphrase-panel");
+    const cmd =
+      payload.apps_fallback?.copy_paste_command ??
+      st.primary_action?.copy_paste_command ??
+      'node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set';
 
-    if (!st.initialized) {
-      title.textContent = "Create vault";
-      auth.innerHTML = `
-        <label>Passphrase<input type="password" id="init-pass" autocomplete="new-password" minlength="8" /></label>
-        <label>Confirm<input type="password" id="init-pass2" autocomplete="new-password" minlength="8" /></label>
-        <div class="actions">
-          <button type="button" class="primary" id="btn-init">Create vault</button>
-        </div>
-      `;
-      secrets.hidden = true;
-      passPanel.hidden = true;
-      $("btn-init").onclick = async () => {
-        const p1 = (document.getElementById("init-pass") as HTMLInputElement).value;
-        const p2 = (document.getElementById("init-pass2") as HTMLInputElement).value;
-        if (p1.length < 8) return setStatus("Passphrase must be at least 8 characters.", "err");
-        if (p1 !== p2) return setStatus("Passphrases do not match.", "err");
-        try {
-          await call("vault_init", { passphrase: p1 });
-          await call("vault_unlock", { passphrase: p1 });
-          setStatus("Vault created.", "ok");
-          await refresh();
-        } catch (e) {
-          setStatus(e instanceof Error ? e.message : String(e), "err");
-        }
-      };
-      return;
-    }
-
-    if (!st.unlocked) {
-      title.textContent = "Unlock";
-      auth.innerHTML = `
-        <label>Passphrase<input type="password" id="unlock-pass" autocomplete="current-password" minlength="8" /></label>
-        <div class="actions">
-          <button type="button" class="primary" id="btn-unlock">Unlock</button>
-        </div>
-      `;
-      secrets.hidden = true;
-      passPanel.hidden = true;
-      $("btn-unlock").onclick = async () => {
-        const p = (document.getElementById("unlock-pass") as HTMLInputElement).value;
-        try {
-          await call("vault_unlock", { passphrase: p });
-          setStatus("Unlocked.", "ok");
-          await refresh();
-        } catch (e) {
-          setStatus(e instanceof Error ? e.message : String(e), "err");
-        }
-      };
-      return;
-    }
-
-    title.textContent = "Credentials";
+    title.textContent = "Status";
     auth.innerHTML = `
-      <div class="row">
-        <span class="hint" style="margin:0">Unlocked</span>
-        <button type="button" class="ghost" id="btn-lock">Lock</button>
-      </div>
+      <p class="hint">${escapeHtml(
+        st.initialized
+          ? "Local plain-text store ready. Lock/unlock not needed."
+          : "Store not created yet. Use Terminal to set up.",
+      )}</p>
+      <p class="hint">Add or remove secrets in <strong>Terminal only</strong> — never paste values in chat.</p>
+      <pre class="cmd">${escapeHtml(cmd)}</pre>
     `;
-    $("btn-lock").onclick = async () => {
-      try {
-        await call("vault_lock");
-        setStatus("Locked.", "ok");
-        await refresh();
-      } catch (e) {
-        setStatus(e instanceof Error ? e.message : String(e), "err");
-      }
-    };
 
-    secrets.hidden = false;
     const list = payload.secrets ?? [];
     secrets.innerHTML = `
-      <ul class="list" id="secret-list">
+      <h2>Named secrets</h2>
+      <ul class="list">
         ${
           list.length === 0
-            ? `<li class="empty">No credentials yet.</li>`
+            ? `<li class="empty">No credentials yet — run Terminal set.</li>`
             : list
                 .map(
                   (s) => `
             <li>
               <strong>${escapeHtml(s.name)}</strong>
-              <button type="button" class="danger" data-del="${escapeHtml(s.name)}">Remove</button>
             </li>`,
                 )
                 .join("")
         }
       </ul>
-      <h2>Add</h2>
-      <label>Name<input type="text" id="sec-name" autocomplete="off" /></label>
-      <label>Value<input type="password" id="sec-value" autocomplete="new-password" /></label>
-      <div class="actions">
-        <button type="button" class="primary" id="btn-save">Save</button>
-      </div>
     `;
-
-    secrets.querySelectorAll("[data-del]").forEach((btn) => {
-      (btn as HTMLButtonElement).onclick = async () => {
-        const name = (btn as HTMLButtonElement).dataset.del!;
-        if (!confirm(`Remove ${name}?`)) return;
-        try {
-          await call("vault_delete_secret", { name });
-          setStatus(`Removed ${name}.`, "ok");
-          await refresh();
-        } catch (e) {
-          setStatus(e instanceof Error ? e.message : String(e), "err");
-        }
-      };
-    });
-
-    $("btn-save").onclick = async () => {
-      const name = (document.getElementById("sec-name") as HTMLInputElement).value.trim();
-      const value = (document.getElementById("sec-value") as HTMLInputElement).value;
-      if (!name || !value) return setStatus("Name and value are required.", "err");
-      try {
-        await call("vault_set_secret", { name, value, tags: [] });
-        (document.getElementById("sec-value") as HTMLInputElement).value = "";
-        setStatus(`Saved ${name}.`, "ok");
-        await refresh();
-      } catch (e) {
-        setStatus(e instanceof Error ? e.message : String(e), "err");
-      }
-    };
-
-    passPanel.hidden = false;
-    passPanel.innerHTML = `
-      <h2>Change passphrase</h2>
-      <label>Current<input type="password" id="cur-pass" autocomplete="current-password" /></label>
-      <label>New<input type="password" id="new-pass" autocomplete="new-password" minlength="8" /></label>
-      <label>Confirm<input type="password" id="new-pass2" autocomplete="new-password" minlength="8" /></label>
-      <div class="actions">
-        <button type="button" class="primary" id="btn-changepw">Update</button>
-      </div>
-    `;
-    $("btn-changepw").onclick = async () => {
-      const cur = (document.getElementById("cur-pass") as HTMLInputElement).value;
-      const n1 = (document.getElementById("new-pass") as HTMLInputElement).value;
-      const n2 = (document.getElementById("new-pass2") as HTMLInputElement).value;
-      if (n1.length < 8) return setStatus("New passphrase must be at least 8 characters.", "err");
-      if (n1 !== n2) return setStatus("New passphrases do not match.", "err");
-      try {
-        await call("vault_change_passphrase", {
-          current_passphrase: cur,
-          new_passphrase: n1,
-        });
-        setStatus("Passphrase updated.", "ok");
-        await refresh();
-      } catch (e) {
-        setStatus(e instanceof Error ? e.message : String(e), "err");
-      }
-    };
   };
 
   const refresh = async () => {
-    // Prefer status/list tools so we do not re-invoke vault_manager (avoids nested Apps).
     const status = await call("vault_status");
     let secrets: SecretMeta[] = [];
-    if (status.unlocked === true) {
-      const listed = await call("list_secrets");
-      secrets = (listed.secrets as SecretMeta[]) ?? [];
+    if (status.initialized === true) {
+      try {
+        const listed = await call("list_secrets");
+        secrets = (listed.secrets as SecretMeta[]) ?? [];
+      } catch {
+        secrets = [];
+      }
     }
     paint({ status: status as ManagerPayload["status"], secrets });
   };
@@ -260,6 +147,7 @@ async function main(): Promise<void> {
   await app.connect();
   try {
     await refresh();
+    setStatus("Status only — use Terminal to add or remove secrets.", "info");
   } catch (e) {
     setStatus(e instanceof Error ? e.message : String(e), "err");
   }
