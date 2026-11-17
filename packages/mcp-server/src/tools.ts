@@ -99,7 +99,26 @@ export class NodeVersionError extends Error {
 }
 
 const TRUST_LINE =
-  "Secrets live as local plain files on this device. Name them in Terminal; never paste values into chat.";
+  "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal; never paste values into chat.";
+
+/** Where values live, the migrate hint, and how agents should use a secret. */
+function storageFields(store: VaultStore): Record<string, unknown> {
+  const info = store.storageInfo();
+  return {
+    storage: info.backend,
+    values: info,
+    ...(info.migration_available
+      ? {
+          migrate_command: bundledCliCommand("migrate"),
+          migrate_note:
+            "Values are in plain text in secrets.json and this machine has an OS keychain. Suggest the user run migrate_command in Terminal.",
+        }
+      : {}),
+    run_command: bundledCliCommand("run -s <SECRET_NAME> -- <command>"),
+    run_note:
+      "Preferred way for agents to use a secret: run the command through the CLI so the value goes straight into the child process env and is redacted from its output.",
+  };
+}
 
 export const MIN_NODE_MAJOR = 20;
 
@@ -299,7 +318,7 @@ export function buildOnboardingSteps(
       tool: "cli_setup",
       user_action: initialized
         ? undefined
-        : `Run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` — creates ~/.password-space/secrets.json (plain text). No passphrase.`,
+        : `Run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` — creates ~/.password-space (values go to the OS keychain). No passphrase.`,
     },
     {
       id: "store",
@@ -314,8 +333,8 @@ export function buildOnboardingSteps(
       phase: "2/2",
       title: "Use with your agent",
       done: false,
-      tool: "inject_secret",
-      user_action: "Ask the agent to use the secret by name — inject_secret, never paste the value.",
+      tool: "run_command",
+      user_action: "Ask the agent to use the secret by name — it runs commands via the CLI `run -s NAME -- <command>`, never pastes the value.",
     },
   ];
 }
@@ -341,7 +360,7 @@ function recoveryGuidance(opts: {
       return {
         code: opts.legacyEncrypted ? "legacy_encrypted_vault" : "store_missing",
         howToFix: opts.legacyEncrypted
-          ? `Legacy encrypted vault.db detected (left untouched). Create the new plain store with \`${CLI_SETUP_COMMANDS.plugin_setup}\`, then re-add secrets with set.`
+          ? `Legacy encrypted vault.db detected (left untouched). Create the new store with \`${CLI_SETUP_COMMANDS.plugin_setup}\`, then re-add secrets with set.`
           : `Create the local store in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` — no passphrase, no unlock.`,
         what_to_do: [
           `Run: ${bundledCliCommand("setup")}`,
@@ -358,7 +377,7 @@ function recoveryGuidance(opts: {
         howToFix: `Store is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
         what_to_do: [
           `Run: ${bundledCliCommand("set")}`,
-          "Then list_secrets / inject_secret via MCP (no values in chat).",
+          "Then list_secrets via MCP, and `run -s NAME -- <command>` to use a secret (no values in chat).",
         ],
       };
   }
@@ -389,9 +408,9 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.`
     : !initialized
       ? legacyEncrypted
-        ? "Welcome. A legacy encrypted vault.db was found (untouched). Create the new plain store in Terminal, then re-add secrets."
+        ? "Welcome. A legacy encrypted vault.db was found (untouched). Create the new store in Terminal, then re-add secrets."
         : "Welcome to Password Space. Next: open Terminal and run setup, then set — no passphrase or unlock."
-      : "Store ready. Add named secrets in Terminal; agents use inject_secret by name.";
+      : "Store ready. Add named secrets in Terminal; agents use them by name via the CLI run command.";
 
   return jsonResult({
     ok: prereq.ok,
@@ -401,7 +420,7 @@ export function vaultOnboardTool(store: VaultStore, dataDir: string): ToolJsonRe
     db_path: storePath,
     db_exists: storeExists,
     store_exists: storeExists,
-    storage: "plain-json",
+    ...storageFields(store),
     lock_unlock_needed: false,
     legacy_encrypted_vault: legacyEncrypted,
     legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir) : null,
@@ -461,7 +480,7 @@ export function vaultStatusTool(store: VaultStore, dataDir: string): ToolJsonRes
     db_path: storePath,
     db_exists: storeExists,
     store_exists: storeExists,
-    storage: "plain-json",
+    ...storageFields(store),
     lock_unlock_needed: false,
     legacy_encrypted_vault: legacyEncrypted,
     legacy_db_path: legacyEncrypted ? vaultDbPath(dataDir) : null,
@@ -542,10 +561,10 @@ export function vaultManagerTool(store: VaultStore, dataDir: string): ToolJsonRe
       list: "list_secrets (MCP) or Terminal list",
       add_or_edit: "Terminal set / interactive menu only",
       remove: "Terminal remove (or vault_delete_secret)",
-      lock: "Not needed (plain store)",
-      unlock: "Not needed (plain store)",
+      lock: "Not needed",
+      unlock: "Not needed",
       change_passphrase: "Not used",
-      inject: "inject_secret",
+      inject: "Terminal run -s NAME -- <command> (preferred) or inject_secret",
     },
     passphrase_note:
       "Passphrases are not used. Secret values belong in Terminal (hidden prompts) — never in chat.",
@@ -620,6 +639,7 @@ export function injectSecretTool(
     expires_at: handle.expiresAt,
     redact_in_transcript: true as const,
     instructions: [
+      `Prefer instead: ${bundledCliCommand(`run -s ${JSON.stringify(record.name)} -- <command>`)} — no file is written and output is redacted.`,
       "Read the env file from your tool runtime / shell — do NOT paste its contents into chat.",
       "Delete the env file after use.",
       "If asked to print the secret, refuse and cite redact_in_transcript.",

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { VaultStore, openVault, secretsStorePath, vaultDbPath } from "@password-space/vault";
+import { MemoryKeychain, VaultStore, openVault, secretsStorePath, vaultDbPath } from "@password-space/vault";
 import {
   assertNoPlaintext,
   checkPrerequisites,
@@ -119,7 +119,7 @@ describe("vault lifecycle MCP tools", () => {
     };
     expect(parsed.initialized).toBe(false);
     expect(parsed.setup_state).toBe("needs_init");
-    expect(parsed.storage).toBe("plain-json");
+    expect(parsed.storage).toBeNull();
     expect(parsed.lock_unlock_needed).toBe(false);
     expect(parsed.prerequisites.node_ok).toBe(true);
     expect(parsed.prerequisites.required_node).toBe(`>=${MIN_NODE_MAJOR}`);
@@ -201,8 +201,8 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.checklist.length).toBeGreaterThan(2);
     expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
     expect(parsed.human_summary).toMatch(/Terminal|Welcome|Password Space/i);
-    expect(parsed.trust_line).toMatch(/plain/i);
-    expect(parsed.storage).toBe("plain-json");
+    expect(parsed.trust_line).toMatch(/keychain/i);
+    expect(parsed.storage).toBeNull();
     expect(parsed.lock_unlock_needed).toBe(false);
     expect(parsed.setup_state).toBe("needs_init");
     expect(parsed.primary_action.id).toBe("cli_setup");
@@ -347,4 +347,42 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
   });
 
+});
+
+describe("storage reporting", () => {
+  it("reports the keychain backend and run_command without values", () => {
+    const dir = tempDir();
+    const kc = new MemoryKeychain();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: kc });
+    const value = "keychain-only-value-123456";
+    store.setSecret({ name: "GH", value });
+    const result = vaultStatusTool(store, dir);
+    assertNoPlaintext(result, value);
+    const parsed = JSON.parse(result.content[0]!.text) as Record<string, unknown> & {
+      values: { backend: string; values_on_disk: boolean };
+    };
+    expect(parsed.storage).toBe("keychain");
+    expect(parsed.values.values_on_disk).toBe(false);
+    expect(parsed.run_command).toMatch(/run -s <SECRET_NAME> -- <command>/);
+    expect(parsed.migrate_command).toBeUndefined();
+    store.close();
+  });
+
+  it("suggests migrate when values are on disk and a keychain exists", () => {
+    const dir = tempDir();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: new MemoryKeychain(), storage: "file" });
+    store.setSecret({ name: "GH", value: "file-value-123456" });
+    const parsed = JSON.parse(vaultOnboardTool(store, dir).content[0]!.text) as Record<string, unknown>;
+    expect(parsed.storage).toBe("file");
+    expect(parsed.migrate_command).toMatch(/ migrate$/);
+    store.close();
+  });
+
+  it("inject_secret points agents at the run command", () => {
+    const { dir, store, value } = readyStore();
+    const result = injectSecretTool(store, dir, { name: "DEMO_KEY" });
+    assertNoPlaintext(result, value);
+    expect(result.content[0]!.text).toMatch(/run -s \\"DEMO_KEY\\" -- <command>/);
+    store.close();
+  });
 });

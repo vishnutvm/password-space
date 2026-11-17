@@ -18,3 +18,5 @@ export function openVault(opts: OpenVaultOptions = {}): VaultStore {
 }
 
 export { vaultDbPath };
+export * from "./keychain.js";
+export * from "./guard.js";

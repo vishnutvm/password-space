@@ -80,7 +80,7 @@ server.registerTool(
   {
     title: "Get started with Password Space",
     description:
-      "Guided setup — local plain-text named secrets, nothing sensitive in the response. Best first call after install. Lock/unlock not needed.",
+      "Guided setup — named secrets with values in the OS keychain, nothing sensitive in the response. Best first call after install.",
   },
   async () => {
     try {
@@ -186,7 +186,7 @@ server.registerTool(
   {
     title: "Save a password or API token",
     description:
-      "Stores a named credential in the local plain-text store. Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
+      "Stores a named credential (value goes to the OS keychain). Prefer Terminal set for humans. Never paste the value into chat. Returns only metadata.",
     inputSchema: {
       name: z
         .string()
@@ -248,7 +248,7 @@ server.tool(
 
 server.tool(
   "inject_secret",
-  "PREFERRED: let the agent use a credential without putting it in chat — writes a short-lived local env file and returns a handle. Do NOT read the file into chat.",
+  "Writes a short-lived local env file with the credential and returns a handle. Prefer running commands with the Terminal CLI `run -s NAME -- <command>` (see vault_status run_command), which writes no file. Do NOT read the file into chat.",
   {
     name: z.string().describe("Secret name or id"),
     env_var: z
@@ -267,7 +267,7 @@ server.tool(
 
 server.tool(
   "resolve_secret",
-  "LAST RESORT: returns plaintext in the tool result. Prefer inject_secret. Requires confirm_redaction=true.",
+  "LAST RESORT: returns plaintext in the tool result. Prefer the CLI run command or inject_secret. Requires confirm_redaction=true.",
   {
     name: z.string().describe("Secret name or id"),
     confirm_redaction: z
