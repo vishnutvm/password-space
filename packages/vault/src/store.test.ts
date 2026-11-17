@@ -3,15 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VaultStore } from "./store.js";
-import { VaultError } from "./types.js";
-import {
-  writeSession,
-  readSession,
-  clearSession,
-  parseSessionTtlInput,
-  SESSION_TTL_1_DAY_MS,
-  SESSION_TTL_1_WEEK_MS,
-} from "./session.js";
 import { redactSecrets, looksLikeSecretLeak } from "./redact.js";
 import { writeInjectFile, clearExpiredInjectFiles } from "./inject.js";
 import { secretsStorePath } from "./paths.js";
@@ -37,7 +28,6 @@ describe("VaultStore plain text", () => {
     expect(store.isInitialized()).toBe(false);
     store.ensure();
     expect(store.isInitialized()).toBe(true);
-    expect(store.isUnlocked).toBe(true);
     expect(existsSync(secretsStorePath(dir))).toBe(true);
 
     const meta = store.setSecret({
@@ -66,28 +56,6 @@ describe("VaultStore plain text", () => {
 
     store.deleteSecret(meta.id);
     expect(store.listSecrets()).toHaveLength(0);
-
-    store.lock();
-    expect(store.isUnlocked).toBe(true);
-    store.close();
-  });
-
-  it("init is idempotent-fail and unlock is a no-op", async () => {
-    const { store } = tmpVault();
-    await store.init();
-    await expect(store.init()).rejects.toMatchObject({ code: "ALREADY_INITIALIZED" });
-    const key = await store.unlock();
-    expect(key.length).toBe(0);
-    expect(store.isUnlocked).toBe(true);
-    store.close();
-  });
-
-  it("changePassphrase is deprecated", async () => {
-    const { store } = tmpVault();
-    store.ensure();
-    await expect(store.changePassphrase("a", "b")).rejects.toMatchObject({
-      code: "DEPRECATED",
-    });
     store.close();
   });
 
@@ -102,49 +70,6 @@ describe("VaultStore plain text", () => {
       /already exists/i,
     );
     store.close();
-  });
-
-  it("session helpers still round-trip (legacy leftover files)", () => {
-    const { dir } = tmpVault();
-    const sessionFile = join(dir, "session");
-    const key = Buffer.alloc(32, 7);
-    writeSession(sessionFile, key, dir);
-    key.fill(0);
-    const session = readSession(sessionFile);
-    expect(session.vaultKey.length).toBe(32);
-    session.vaultKey.fill(0);
-    clearSession(sessionFile);
-    expect(existsSync(sessionFile)).toBe(false);
-  });
-
-  it("expired session is rejected and cleared", () => {
-    const { dir } = tmpVault();
-    const sessionFile = join(dir, "session");
-    const key = Buffer.alloc(32, 3);
-    writeSession(sessionFile, key, dir, -1000);
-    key.fill(0);
-    expect(() => readSession(sessionFile)).toThrow(VaultError);
-    expect(existsSync(sessionFile)).toBe(false);
-  });
-
-  it("until-lock session never auto-expires", () => {
-    const { dir } = tmpVault();
-    const sessionFile = join(dir, "session");
-    const key = Buffer.alloc(32, 1);
-    writeSession(sessionFile, key, dir, null);
-    key.fill(0);
-    const session = readSession(sessionFile);
-    expect(session.untilLock).toBe(true);
-    expect(session.expiresAt).toBeNull();
-    session.vaultKey.fill(0);
-    clearSession(sessionFile);
-  });
-
-  it("parseSessionTtlInput accepts presets", () => {
-    expect(parseSessionTtlInput("1d")).toBe(SESSION_TTL_1_DAY_MS);
-    expect(parseSessionTtlInput("1w")).toBe(SESSION_TTL_1_WEEK_MS);
-    expect(parseSessionTtlInput("until-lock")).toBeNull();
-    expect(parseSessionTtlInput(2)).toBe(2 * 60 * 60 * 1000);
   });
 });
 

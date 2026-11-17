@@ -34,13 +34,9 @@ export class VaultError extends Error {
     readonly code:
       | "NOT_INITIALIZED"
       | "ALREADY_INITIALIZED"
-      | "LOCKED"
-      | "WRONG_PASSPHRASE"
       | "NOT_FOUND"
       | "DUPLICATE_NAME"
-      | "INVALID"
-      | "LEGACY_ENCRYPTED"
-      | "DEPRECATED",
+      | "INVALID",
   ) {
     super(message);
     this.name = "VaultError";

@@ -140,7 +140,6 @@ Commands:
   onboard                Print next Terminal step
   get <name>             Print secret value (human only — not for agents)
   audit                  Recent access events (no values)
-  unlock | lock          No-ops (kept for compatibility — not needed)
   help                   Show this help
 
 Options:
@@ -157,7 +156,6 @@ Environment:
 
 Store file:  ~/.password-space/secrets.json  (mode 0600, plain values at rest)
 Agents use MCP inject_secret / list_secrets by name — never paste secrets in chat.
-Lock/unlock/passphrase are not part of the product path.
 `);
 }
 
@@ -470,17 +468,9 @@ async function main(): Promise<void> {
       }
 
       case "unlock":
-        console.log("✓ Unlock not needed — the store is local plain text.");
-        console.log("  Add secrets with set; agents use inject_secret by name.");
-        break;
-
       case "lock":
-        console.log("✓ Lock not needed — the store stays readable locally.");
-        console.log("  (No unlock session is used.)");
-        break;
-
       case "change-passphrase":
-        console.log("Passphrases are not used. The store is local plain text.");
+        console.log(`${command} is no longer needed: there is no passphrase or unlock session.`);
         break;
 
       case "status":
