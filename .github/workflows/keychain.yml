@@ -1,0 +1,59 @@
+name: keychain
+
+# Round-trips secrets through the real OS keychain on each platform.
+# Unit tests elsewhere use an in-memory keychain; this job checks the
+# macOS `security`, Windows Credential Manager and Linux `secret-tool` backends.
+on:
+  pull_request:
+    paths:
+      - "packages/vault/**"
+      - ".github/workflows/keychain.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keychain:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PASSWORD_SPACE_KEYCHAIN_IT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Linux keyring
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsecret-tools gnome-keyring
+
+      - name: Keychain tests (Linux, inside a D-Bus session with an unlocked keyring)
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            pnpm --filter @password-space/vault exec vitest run src/keychain.test.ts src/store-keychain.test.ts
+          '
+
+      - name: Throwaway macOS keychain
+        if: runner.os == 'macOS'
+        run: |
+          KC="$RUNNER_TEMP/ps-ci.keychain-db"
+          security create-keychain -p ci "$KC"
+          security unlock-keychain -p ci "$KC"
+          security set-keychain-settings "$KC"
+          echo "PASSWORD_SPACE_MACOS_KEYCHAIN=$KC" >> "$GITHUB_ENV"
+
+      - name: Keychain tests (macOS, Windows)
+        if: runner.os != 'Linux'
+        run: pnpm --filter @password-space/vault exec vitest run src/keychain.test.ts src/store-keychain.test.ts
