@@ -1,37 +1,36 @@
 # Password Space — Security Audit
 
-**Date:** 2026-11-10 · Complements [AUDIT.md](./AUDIT.md) and root [SECURITY.md](../SECURITY.md).
+**Date:** 2026-11-10 · **Revised:** 2026-11-17 for the plain JSON store · Complements [AUDIT.md](./AUDIT.md) and root [SECURITY.md](../SECURITY.md).
+
+> **What changed.** The 2026-11-10 audit reviewed an encrypted vault (scrypt KDF, AES-256-GCM, wrapped vault key, unlock sessions). That design is gone from the product path. Secrets now live as **plain JSON** in `secrets.json` (mode `0600`). There is no passphrase, no unlock session, and no encryption at rest. The crypto review has been replaced with the at-rest review below.
 
 ## Assets
 
 | Asset | Sensitivity |
 | --- | --- |
-| Unlock passphrase | Critical — sole recovery factor |
-| Vault key (in memory / session) | Critical while unlocked |
-| Secret plaintext | Critical |
-| Secret metadata (names, tags, notes) | Confidential |
+| `secrets.json` (plain values + metadata) | Critical — anyone who can read it has every secret |
+| Secret plaintext in process memory | Critical while handled |
 | Inject env files | Critical until deleted |
-| Audit events | Low (no values) |
+| Secret metadata (names, tags, notes) | Confidential |
+| Audit events (`audit.jsonl`) | Low (no values) |
 
-## Crypto review (evidence-backed)
+## At-rest review (evidence-backed)
 
 | Control | Implementation | Assessment |
 | --- | --- | --- |
-| KDF | Node `crypto.scrypt`, N=2¹⁵, r=8, p=1, 32-byte salt, maxmem 64MiB | Adequate for local MVP; Argon2id would be a future upgrade, not a rewrite without need |
-| AEAD | AES-256-GCM, 12-byte IV, auth tag | Correct Node AEAD usage |
-| Key hierarchy | Random vault key wrapped by passphrase-derived master | Sound |
-| Session | Vault key re-wrapped with random `fileKey` stored **in the same file** | **Local trust only** — equivalent to unlocked password-manager session; `0600` + TTL |
-| Zeroization | `Buffer.fill(0)` on master/session keys in several paths | Best-effort in JS; not a hard guarantee against GC copies |
-
-**Lost passphrase = unrecoverable.** No recovery kit (by design).
+| Storage | `$PASSWORD_SPACE_HOME/secrets.json`, JSON, `packages/vault/src/store.ts` | **Plaintext at rest** — accepted by product decision |
+| File mode | Written with `mode: 0o600`, then `chmodSync(0o600)` (best-effort) | Single-user protection only; no defense against the same OS user, backups, or disk images |
+| Write safety | Temp file `secrets.json.<pid>.tmp` + `rename` | Atomic replace on POSIX; no partial-write corruption |
+| Encryption / KDF | None | Use a dedicated password manager if ciphertext at rest is required |
+| Recovery | Plain file — back it up like any other sensitive file | No passphrase to lose |
+| Legacy `vault.db` | Detected, never read, deleted, or migrated | Old ciphertext stays wherever the user left it |
 
 ## Lifecycle
 
 ```text
-init → unlock (session) → set/list/get/inject → lock (clear session)
-         │
-         ├─ wrong passphrase → (rate-limited) fail
-         └─ change passphrase → re-wrap vault key under new salt/KDF
+setup (create secrets.json) → set / list / inject / remove
+                                   │
+                                   └─ unlock / lock / change-passphrase → soft-compat no-ops
 ```
 
 ## Trust boundary: `inject_secret`
@@ -44,7 +43,7 @@ init → unlock (session) → set/list/get/inject → lock (clear session)
          │ runtime may read file
          ▼
 ┌──────────────────┐
-│ inject/<tok>.env │  plaintext KEY='value'  mode 0600  TTL metadata
+│ inject/<tok>.env │  plaintext KEY='value'  mode 0600  TTL 5 min
 └────────┬─────────┘
          │ same OS user / malware can read while present
          ▼
@@ -53,55 +52,59 @@ init → unlock (session) → set/list/get/inject → lock (clear session)
 └──────────────────┘
 ```
 
+`secrets.json` itself sits next to the inject directory and is readable by the same principals, so inject files add no new exposure class — they only add more copies of a value for a short time.
+
 ### What inject protects
 
-- Keeps secret **out of the default MCP tool JSON** returned to the model/chat.
-- Defense-in-depth: refuse to return if serialized payload contains the value.
+- Keeps the secret **out of the default MCP tool JSON** returned to the model/chat.
+- Defense-in-depth: refuse to return if the serialized payload contains the value.
 
 ### What inject does **not** protect
 
-- Any tool/runtime that reads `env_file` and pastes contents into chat.
-- Disk forensics while the file exists (or after insecure delete on some FS).
-- Process memory of the MCP server while decrypting.
+- Any tool/runtime that reads `env_file` (or `secrets.json`) and pastes contents into chat.
+- Disk forensics of `secrets.json` or inject files.
+- Process memory of the MCP server.
 - Cross-user isolation (single-user model).
 
-### Mitigations shipped / reinforced
+### Mitigations shipped
 
 1. Prefer inject over `resolve_secret`.
-2. Auto-delete **expired** inject files on unlock/inject.
+2. Auto-delete **expired** inject files on inject and on soft-compat unlock/lock.
 3. Skill + command: never print inject file contents.
 4. `redact_in_transcript: true` flag for cooperating clients.
-5. Default TTL 5 minutes (metadata + cleanup).
+5. Default TTL 5 minutes.
+6. `beforeSubmitPrompt` hook (`plugins/password-space/scripts/redact.mjs`) blocks outbound prompts that contain a known inject value.
 
 ## MCP tool matrix
 
 | Tool | Plaintext? | Notes |
 | --- | --- | --- |
 | `vault_onboard` / `vault_status` / `vault_manager` | No | Status + UI metadata |
-| `vault_init` / `vault_unlock` / `vault_change_passphrase` | Passphrase in **args** only | Never elicitation; never echo |
-| `vault_set_secret` | Value in args; not in result | Leak check on serialize |
+| `vault_init` | No | Ensures `secrets.json` exists. `passphrase` arg accepted and ignored |
+| `vault_unlock` / `vault_lock` | No | No-ops. Clear leftover legacy `session` file and expired inject files |
+| `vault_change_passphrase` | No | Returns `ok: false, code: "passphrase_not_used"` |
+| `vault_set_secret` | Value in args; not in result | Leak check on serialize. Humans should prefer Terminal `set` |
 | `list_secrets` / `get_secret_metadata` | No | |
 | `vault_delete_secret` | No | |
 | `inject_secret` | File only | See boundary above |
 | `resolve_secret` | **Yes** in result | Requires `confirm_redaction` |
-| `vault_lock` | No | Clears session |
 
-## Passphrase channels (allowed)
+## Secret value channels (allowed)
 
-1. MCP tool approval form arguments  
-2. `PASSWORD_SPACE_PASSPHRASE` in MCP Environment  
-3. CLI hidden prompt / env  
-4. MCP Apps Vault Manager form → `callServerTool` with passphrase args  
+1. Terminal CLI hidden prompt (`dist/cli.js set`) — **primary**
+2. stdin pipe to `set` (non-TTY)
+3. `--value` flag (discouraged: shell history)
+4. MCP `vault_set_secret` args (agent path; value never echoed)
 
-**Forbidden:** MCP elicitation for passphrase or secret values (spec + product rule).
+**Forbidden:** MCP elicitation or Vault Manager App forms for secret values; pasting values into chat.
 
-## Residual risks (accept / external audit)
+## Residual risks (accepted)
 
-- Session file theft while unlocked  
-- No hardware-backed keys / OS keychain integration  
-- No per-secret ACL for MCP callers  
-- Hook redaction is known-value only  
-- JS memory zeroization limits  
-- Marketplace plugin runs as local Node with full vault access when unlocked  
+- Plaintext `secrets.json` readable by the same OS user, backups, sync tools, and malware
+- No hardware-backed keys / OS keychain integration
+- No per-secret ACL for MCP callers — any MCP caller can inject any secret by name
+- Hook redaction is known-value only (inject files), not the whole store
+- JS memory zeroization limits
+- Marketplace plugin runs as local Node with full read access to `secrets.json`
 
-**Recommendation:** Independent crypto/session review before marketing as a replacement for OS keychain or enterprise secret managers.
+**Recommendation:** Do not position Password Space as a replacement for an OS keychain or password manager. Its job is keeping secrets out of chat transcripts.
