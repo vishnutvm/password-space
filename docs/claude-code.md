@@ -40,7 +40,7 @@ remove that entry so the tools are not registered twice:
    `inject_secret`. Never paste values into the prompt.
 
 The store is the same as in Cursor: `~/.password-space/secrets.json`
-(or a real absolute `PASSWORD_SPACE_HOME`). Cursor and Claude Code share it.
+(or a real absolute `PASSWORD_SPACE_HOME`). Cursor, Claude Code and Codex ([codex.md](./codex.md)) share it.
 
 ## What's in the package
 

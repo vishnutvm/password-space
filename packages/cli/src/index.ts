@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { stdin as input, stdout as output, exit } from "node:process";
 import {
@@ -11,6 +12,13 @@ import {
   type StorageInfo,
 } from "@password-space/vault";
 import { parseRunArgs, runWithSecrets, RUN_USAGE } from "./run.js";
+import {
+  CODEX_SETUP_USAGE,
+  codexConfigSnippet,
+  codexHome,
+  resolvePluginRoot,
+  writeCodexConfig,
+} from "./codex.js";
 
 type Args = {
   command: string;
@@ -140,6 +148,7 @@ Commands:
   list                   List secret names only (no values)
   run -s NAME -- <cmd>   Run a command with secrets in its environment (see below)
   migrate [--to file]    Move values into the OS keychain (or back to secrets.json)
+  codex-setup [--write]  Print (or append) the ~/.codex/config.toml block for OpenAI Codex
   menu | interactive     Full interactive menu
   onboard                Print next Terminal step
   get <name>             Print secret value (human only — not for agents)
@@ -156,6 +165,8 @@ Options:
   --yes                  Skip confirm prompts where safe
 
 ${RUN_USAGE}
+
+${CODEX_SETUP_USAGE}
 
 Environment:
   PASSWORD_SPACE_HOME      Same as --data-dir
@@ -485,6 +496,42 @@ Status: ${snap.initialized ? `ready · ${snap.secretCount} secret(s)` : "not cre
   }
 }
 
+function runCodexSetup(flags: Record<string, string | boolean>): void {
+  const str = (k: string) => (typeof flags[k] === "string" ? (flags[k] as string) : undefined);
+  const pluginRoot = resolvePluginRoot(process.argv[1] ?? "", str("plugin-root"));
+  const hooks = !flags["no-hooks"];
+  const envHome = process.env.PASSWORD_SPACE_HOME?.trim();
+  const dataDir = envHome && !envHome.includes("${") ? envHome : undefined;
+  const opts = { pluginRoot, hooks, ...(dataDir ? { dataDir } : {}) };
+
+  if (!flags.write) {
+    console.log(`# Add to ${join(codexHome(), "config.toml")} (or run: ${selfCmd()} codex-setup --write)\n`);
+    console.log(codexConfigSnippet(opts));
+    console.log(`# Optional skill: copy ${join(pluginRoot, "skills", "password-space")} to ~/.agents/skills/password-space`);
+    return;
+  }
+
+  const home = str("codex-home");
+  const r = writeCodexConfig({ ...opts, codexHome: home ? home : codexHome(), skill: !flags["no-skill"] });
+  const what = {
+    all: hooks ? "MCP server and hooks" : "MCP server",
+    server: "MCP server (hooks were already there)",
+    hooks: "hooks (MCP server was already there)",
+    nothing: "nothing: Password Space is already configured",
+  }[r.wrote];
+  console.log(`Codex config: ${r.configPath}\n  Added: ${what}`);
+  if (r.skill === "copied") console.log(`  Skill: copied to ${r.skillPath}`);
+  if (r.skill === "exists") console.log(`  Skill: ${r.skillPath} already exists (left as is)`);
+  console.log("\nNext:");
+  console.log("  1. Restart Codex. Check with /mcp that password-space is listed.");
+  if (hooks && (r.wrote === "all" || r.wrote === "hooks")) {
+    console.log("  2. Run /hooks in Codex and trust the two Password Space hooks (Codex skips untrusted hooks).");
+  }
+  if (dataDir) {
+    console.log(`  Note: hooks read PASSWORD_SPACE_HOME from the shell that starts Codex. Export it there too.`);
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
   // `run` parses its own options: flags after `--` belong to the child command.
@@ -529,6 +576,10 @@ async function main(): Promise<void> {
         const code = await runWithSecrets(dataDir, parseRunArgs(process.argv.slice(3)));
         exit(code);
       }
+
+      case "codex-setup":
+        runCodexSetup(args.flags);
+        break;
 
       case "onboard": {
         const snap = storeSnapshot(dataDir);
