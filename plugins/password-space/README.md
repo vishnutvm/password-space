@@ -11,7 +11,7 @@
 | MCP server (`dist/index.js`) | Status, list, inject by name |
 | Terminal CLI (`dist/cli.js`) | **Sole human UX** — interactive menu + setup / add / remove (hidden value prompts) — **bundled; no clone** |
 | Skill + `/setup-password-space` | Guided setup — Terminal-only |
-| Hooks | Gentle welcome when no store yet; redaction before send |
+| Hooks | Gentle welcome when no store yet; block prompts that contain a stored value; block agent commands and file reads that would read values directly (`get`, keychain lookups, `secrets.json`, inject files) |
 
 ## After install
 
@@ -39,8 +39,10 @@ Default store folder: `~/.password-space`. Optional override: a real absolute `P
 | Tool | Returns secrets? |
 | --- | --- |
 | `vault_onboard` | No — start here (`primary_action` only) |
-| `vault_status` / `list_secrets` | No |
-| `inject_secret` | No — **preferred** for agents (by name) |
+| `vault_status` / `list_secrets` | No — agents check `list_secrets` before asking for a key |
+| `store_secret` | No — agent saves a key the user handed over (`overwrite: true` to replace) |
+| `remove_secret` | No — agent deletes a secret by name |
+| `inject_secret` | No — only when a command can't be wrapped with the CLI `run` |
 | `vault_manager` | No — status-only; **do not** use for add |
 
 `vault_init` / `vault_unlock` / `vault_lock` may still appear for compatibility — they are **not** required.

@@ -22,7 +22,7 @@
 ```text
 Human: Terminal setup / set → ~/.password-space/secrets.json (plain JSON, 0600, atomic write)
 Audit: ~/.password-space/audit.jsonl (append-only, no values)
-Agent path: inject_secret → inject/<token>.env (0600, 5 min TTL) + handle; resolve_secret last resort
+Agent path: inject_secret → inject/<token>.env (dir 0700, file 0600, 60 s TTL, deleted at expiry and on server exit) + handle; resolve_secret off unless PASSWORD_SPACE_ENABLE_RESOLVE=1
 Lock / unlock / change-passphrase: soft-compat no-ops (MCP + CLI)
 ```
 

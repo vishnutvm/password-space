@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in the CLI, MCP server, plugin or hooks does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste a real secret value** in an issue, a log or a screenshot. Use a fake value such as `test-token-123`.
+        Security problems (a way to read or leak values) go to [private vulnerability reporting](https://github.com/vishnutvm/password-space/security/advisories/new) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran or asked the agent to do, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. password-space setup
+        2. password-space set TEST_TOKEN
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - CLI (password-space)
+        - MCP server / tools
+        - Claude Code plugin
+        - Cursor plugin
+        - Prompt hook
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Password Space version
+      description: From the plugin manifest, `npm ls -g password-space`, or the git commit you built.
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and storage backend
+      description: Output of `password-space status` shows the backend (keychain or file).
+      placeholder: macOS 15.1, keychain
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: "20.18.0"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Check that no secret values appear before you submit.
+      render: text

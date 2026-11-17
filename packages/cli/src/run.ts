@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { VaultError, openVault } from "@password-space/vault";
+import { VaultError, envNameFor, openVault } from "@password-space/vault";
 
 export const RUN_USAGE = `Run a command with secrets in its environment:
   password-space run -s GITHUB_TOKEN -- gh repo list
@@ -11,6 +11,7 @@ export const RUN_USAGE = `Run a command with secrets in its environment:
   -s, --secret VAR=NAME    Pass secret NAME as env var VAR
   --all                    Pass every stored secret
   --redact / --no-redact   Replace secret values in the command's output with [REDACTED]
+                           (--no-redact needs an interactive terminal)
                            (default: on when output is not a terminal, e.g. an agent)
   The command runs directly (no shell). Values never appear in argv or chat.`;
 
@@ -57,13 +58,16 @@ export function parseRunArgs(argv: string[]): RunOptions {
   return opts;
 }
 
-export function envNameFor(secretName: string): string {
-  const cleaned = secretName
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  if (!cleaned) return "SECRET";
-  return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
+export { envNameFor };
+
+/**
+ * Quote one argument for a cmd.exe command line that ends up in a
+ * CommandLineToArgvW / MSVC-style parser (node.exe, most CLIs).
+ */
+export function quoteWindowsArg(arg: string): string {
+  if (arg !== "" && /^[A-Za-z0-9_\-+=.,:/\\@]+$/.test(arg)) return arg;
+  const escaped = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1");
+  return `"${escaped}"`;
 }
 
 /** Resolve specs to env vars. Throws before anything runs if a name is unknown. */
@@ -153,16 +157,25 @@ export async function runWithSecrets(defaultDataDir: string, opts: RunOptions): 
   if (opts.specs.length === 0 && !opts.all) {
     throw new VaultError(`Name at least one secret with -s NAME (or use --all).\n\n${RUN_USAGE}`, "INVALID");
   }
+  if (opts.redact === false && !process.stdout.isTTY) {
+    throw new VaultError(
+      "--no-redact only works when output goes to an interactive terminal. Piped or captured output (agents, scripts, logs) is always redacted.",
+      "INVALID",
+    );
+  }
   const secretEnv = resolveRunEnv(opts.dataDir ?? defaultDataDir, opts);
   const redact = opts.redact ?? !process.stdout.isTTY;
-  const [cmd, ...args] = opts.command;
+  const isWindows = process.platform === "win32";
+  // With shell: true Node joins the command line unescaped, so quote each part
+  // ourselves (paths like C:\Program Files\..., arguments with spaces or quotes).
+  const [cmd, ...args] = isWindows ? opts.command.map(quoteWindowsArg) : opts.command;
 
   return await new Promise<number>((resolve) => {
     const child = spawn(cmd!, args, {
       env: { ...process.env, ...secretEnv },
       stdio: redact ? ["inherit", "pipe", "pipe"] : "inherit",
       // .cmd/.bat shims (npm, npx, ...) only start through the shell on Windows.
-      shell: process.platform === "win32",
+      shell: isWindows,
     });
 
     const values = Object.values(secretEnv);

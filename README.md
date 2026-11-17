@@ -33,12 +33,14 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 
 **Designed to protect:** chat/transcript plane when agents use `inject_secret` / tool-arg secrets and follow the Skill (handles like `ps://NAME` instead of values).
 
-**Does not protect against:** malware or an agent running as your user that calls the keychain or `password-space get` itself; plaintext in process memory, inject `*.env` files, or CLI `get` / `resolve_secret` results; a command that prints its own environment when output redaction is off; hooks that are disabled. With the file fallback, anyone who can read your user files can read `secrets.json`.
+**Does not protect against:** malware, or an agent running as your user that deliberately works around it (for example obfuscated keychain commands, `get` inside a pseudo-terminal, or sourcing an inject file and printing it); plaintext in process memory; a command that encodes or sends its own environment; hooks that are disabled. With the file fallback, anyone who can read your user files can read `secrets.json`. See [SECURITY.md](./SECURITY.md#what-an-agent-with-shell-access-can-still-do).
+
+**Closed by default for agents:** CLI `get` only prints to an interactive terminal; `run --no-redact` needs a terminal; `resolve_secret` is not even listed unless you set `PASSWORD_SPACE_ENABLE_RESOLVE=1`; inject files live 60 seconds and are deleted when the MCP server exits; tool hooks block `get`, direct keychain lookups and reads of `secrets.json` / inject files.
 
 | Area | MVP behavior |
 | --- | --- |
 | At rest | Values in the OS keychain (service `password-space`). `secrets.json` (mode `0600`) has names, tags, notes and keyed fingerprints. File fallback: values in `secrets.json` |
-| Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, mode `0600`, default TTL **5 minutes** |
+| Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, dir `0700`, file `0600`, default TTL **60 seconds**, deleted at expiry and when the MCP server exits |
 | Prompt hooks | Cursor, Claude Code and Codex prompts that contain **any stored value** are blocked (values of 6+ characters) |
 | `run` output | Values are replaced with `[REDACTED]` in the command's output when it is not a terminal |
 
@@ -77,7 +79,7 @@ Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/archi
 vault_onboard → Terminal: …/dist/cli.js setup → …/dist/cli.js set → vault_status / list_secrets → inject_secret
 ```
 
-Pass **secret name + value** in **Terminal** — **never** in chat. MCP tools handle status / list / inject by name. Vault Manager is optional status UI only.
+Pass **secret name + value** in **Terminal**, or hand a key to your agent once and it saves it with `store_secret` (see below). MCP tools handle status / list / use by name. Vault Manager is optional status UI only.
 
 Official public listing (later): [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).
 
@@ -119,6 +121,16 @@ node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" remove
 ```
 
 If `vault_onboard` returns an absolute path to `cli.js`, prefer that paste command.
+
+### From npm
+
+The Terminal CLI is published as [`password-space`](https://www.npmjs.com/package/password-space) once a release has gone out:
+
+```bash
+npm install -g password-space
+password-space setup
+password-space set GITHUB_TOKEN
+```
 
 ### Contributors (optional clone)
 
@@ -176,17 +188,32 @@ Without the marketplace, point Cursor (or another MCP client) at the **bundled**
 
 Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugins/password-space/skills/password-space/`. Hooks: `plugins/password-space/hooks/hooks.json`.
 
+### Hand a key to your agent once
+
+If you would rather not use Terminal, give the key to your agent one time, for example
+*"here is my GitHub token, save it as GITHUB_TOKEN: ghp_…"*. The agent calls `store_secret`,
+the value goes to your OS keychain, and from then on every session finds it with `list_secrets`
+and uses it by name through `run -s GITHUB_TOKEN -- <command>`. You don't paste it again.
+
+- The value is never returned by any tool result except `resolve_secret`, which is off unless you set `PASSWORD_SPACE_ENABLE_RESOLVE=1`, and errors are scrubbed of it.
+- An existing name is never replaced unless the agent passes `overwrite: true` (for a rotated key).
+- `remove_secret` deletes a secret by name when you ask the agent to forget it.
+- Every add, update and remove is written to `~/.password-space/audit.jsonl` with the name and actor (`mcp-agent`), never the value.
+- The copy you pasted stays in that chat's history. Use Terminal `set` for keys that should never touch a chat.
+- macOS limits keychain values to about 1,900 bytes and Windows to 2,560; longer values are refused with that message.
+
 ### MCP tools
 
 | Tool | Returns secret value? | Use |
 | --- | --- | --- |
 | `vault_onboard` | No | Guided next step (`primary_action`) |
 | `vault_status` | No | Store ready? Next step hint |
-| `vault_set_secret` | **No** (metadata only) | Prefer Terminal `set` for humans |
-| `list_secrets` | No | Discover names / ids / tags |
+| `store_secret` | **No** (metadata + how to use it by name) | Agent saves a key the user handed over. `overwrite: true` to replace. Alias: `vault_set_secret` |
+| `remove_secret` | No | Agent deletes a secret by name. Alias: `vault_delete_secret` |
+| `list_secrets` | No | Discover names / ids / tags. Agents check this before asking for a key |
 | `get_secret_metadata` | No | One secret’s metadata |
 | `inject_secret` | **No** (writes env file) | Agent access by name when the CLI `run` command cannot be used |
-| `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |
+| `resolve_secret` | Yes, if `confirm_redaction: true` | **Off by default**: only listed when you set `PASSWORD_SPACE_ENABLE_RESOLVE=1` in the MCP server env |
 
 ## Storage
 
@@ -248,9 +275,10 @@ value to a temporary file.
 | What does `inject_secret` return? | JSON with `handle` (`ps://NAME`), `env_file`, `env_var`, `expires_at`, `redact_in_transcript: true` — **not** the secret value |
 | Where is the file? | `$PASSWORD_SPACE_HOME/inject/<random>.env` |
 | Permissions? | Written with mode `0600` |
-| How to use without printing? | Read/source the file in a shell or tool runtime; do **not** `cat` it into chat |
+| How to use without printing? | Source it in the same command: `set -a; . FILE; set +a; <command>`. The tool hooks block `cat`, `grep` and `Read` on it |
+| How long does it live? | 60 seconds. The MCP server deletes it at expiry and when it exits |
 
-Avoid CLI `get` and MCP `resolve_secret` in agent workflows — both can put plaintext into the tool/CLI result stream.
+CLI `get` refuses to print without an interactive terminal, and `resolve_secret` is off unless you opt in, so agents use `run` or `inject_secret`.
 
 ## Architecture
 
@@ -295,9 +323,9 @@ pnpm install && pnpm build && pnpm test
 | Path | Role |
 | --- | --- |
 | `packages/vault` | Store, OS keychain backends, prompt guard, inject, redact |
-| `packages/cli` | Human Terminal CLI |
+| `packages/cli` | Human Terminal CLI, published to npm as `password-space` |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
 | `plugins/password-space` | Cursor and Claude Code plugin, also used by Codex via `codex-setup` (bundled MCP + CLI + skill + hooks + logo) |
 | `hooks/` | Portable redaction wrapper (same code as the plugin hook, opt-in defaults) |
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Changes: [CHANGELOG.md](./CHANGELOG.md). Releases: [docs/RELEASING.md](./docs/RELEASING.md). License: [MIT](./LICENSE).

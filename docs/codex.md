@@ -33,6 +33,9 @@ edits or removes your existing lines, skips anything Password Space already adde
 creates the file with mode 0600 if it is missing. It also copies the skill to
 `~/.agents/skills/password-space/SKILL.md` unless one is already there.
 
+Run it with the plugin's own `dist/cli.js`. The npm `password-space` CLI does not ship
+the MCP server or hooks, so with it you must pass `--plugin-root <plugin folder>`.
+
 To see the block first without writing anything, drop `--write`. Options:
 `--no-hooks`, `--no-skill`, `--plugin-root <dir>`, `--codex-home <dir>`.
 

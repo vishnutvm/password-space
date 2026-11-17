@@ -603,7 +603,7 @@ var VaultStore = class {
     this.writeValue(row, input.value);
     if (!existing) data.secrets.push(row);
     this.persist();
-    this.audit(existing ? "update" : "create", row.id, name, "human", null);
+    this.audit(existing ? "update" : "create", row.id, name, input.actor ?? "human", null);
     return this.getMetadata(row.id);
   }
   writeValue(row, value) {
@@ -619,14 +619,18 @@ var VaultStore = class {
     const key = this.hookKey(true);
     row.guard = guardPrint(key, value);
   }
-  deleteSecret(idOrName) {
+  /** True when a secret with this exact id or (case-insensitive) name exists. */
+  hasSecret(idOrName) {
+    return this.findRow(idOrName) !== void 0;
+  }
+  deleteSecret(idOrName, actor = "human") {
     const data = this.requireReady();
     const row = this.findRow(idOrName);
     if (!row) throw new VaultError(`Secret not found: ${idOrName}`, "NOT_FOUND");
     if (data.backend === "keychain") this.requireKeychain().delete(this.account(row.id));
     data.secrets = data.secrets.filter((s) => s.id !== row.id);
     this.persist();
-    this.audit("delete", row.id, row.name, "human", null);
+    this.audit("delete", row.id, row.name, actor, null);
   }
   /**
    * Move every value to another backend.
