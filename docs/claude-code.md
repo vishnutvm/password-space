@@ -58,21 +58,20 @@ The store is the same as in Cursor: `~/.password-space/secrets.json`
 | Cursor hook | Claude Code equivalent | Behaviour |
 | --- | --- | --- |
 | `sessionStart` → `session-vault-hint.mjs` | `SessionStart` (startup) → `claude-session-hint.mjs` | Adds a setup hint to Claude's context when `secrets.json` does not exist. Silent once the store exists. |
-| `beforeSubmitPrompt` → `redact.mjs` | `UserPromptSubmit` → `claude-prompt-guard.mjs` | **Blocks** a prompt that contains a known secret value and tells you which secret name matched. |
+| `beforeSubmitPrompt` → `prompt-guard.mjs --format cursor` | `UserPromptSubmit` → `prompt-guard.mjs --format claude` | **Blocks** a prompt that contains any stored secret value and tells you which secret name matched. Same script for both. |
 
 What does not carry over:
 
-- **No redaction rewrite.** Cursor's hook can replace a value with
-  `[REDACTED]` and still send the message. Claude Code's `UserPromptSubmit`
-  hook can only allow or block a prompt, so the Claude hook blocks. Your prompt
-  is erased; retype it using the secret's name.
+- **Blocked, not rewritten.** Both hooks block the prompt; Claude Code erases
+  it. Retype it using the secret's name.
 - **Tool output is not filtered.** Neither hook sees output from Bash or other
-  tools. If a command prints a secret, Claude sees it. Keep using
-  `inject_secret` so values go into the process environment, not into output.
-- **Matching is exact.** Only values already in `secrets.json` or
-  `inject/*.env` are detected. Values shorter than 6 characters are skipped to
+  tools. Have Claude run commands as `cli.js run -s NAME -- <command>`: the
+  value goes into the command's environment and is redacted from its output.
+- **Matching is exact.** Only stored values (keychain or file) and live
+  `inject/*.env` values are detected. Values shorter than 6 characters are skipped to
   avoid false blocks on common strings.
 
-The Claude prompt guard checks `secrets.json` as well as `inject/*.env`, so any
-stored value is caught, not only ones that were injected recently. It never
-prints a value, only the secret's name.
+Keychain values are matched by a keyed fingerprint stored in `secrets.json`, so
+the hook never reads the values themselves. If the keychain cannot be reached,
+the hook lets the prompt through and prints a warning. It never prints a value,
+only the secret's name.
