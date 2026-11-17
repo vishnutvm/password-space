@@ -6,7 +6,7 @@ Thanks for helping make Password Space better.
 
 1. **Chat stays clean** — MCP list/metadata tools must not return values; prefer inject handles.
 2. **Terminal-only human UX** — no App UI / Configure variables for secret entry.
-3. **Plain local store** — product path is named secrets in `secrets.json` (mode `0600`); do not reintroduce unlock as a required gate without an explicit product decision.
+3. **OS keychain store** — values in the OS keychain, names in `secrets.json` (mode `0600`), plain-file fallback only without a keychain; do not reintroduce unlock as a required gate without an explicit product decision.
 4. **Local-first** — sync/cloud features are out of scope until designed with a threat model update.
 5. **No destructive migrate-by-default** — never wipe a user's existing `~/.password-space` or legacy `vault.db`.
 
@@ -26,7 +26,7 @@ After changing MCP, CLI, or vault sources, `pnpm build` rebuilds packages and re
 
 | Path | Role |
 | --- | --- |
-| `packages/vault` | Plain store, inject, redact (legacy crypto helpers may remain unused) |
+| `packages/vault` | Plain store, inject, redact |
 | `packages/cli` | Human CLI (also bundled to plugin `dist/cli.js`) |
 | `packages/mcp-server` | MCP tools for agents |
 | `plugins/password-space` | Cursor plugin (bundled MCP + CLI + skill + hooks + logo) |

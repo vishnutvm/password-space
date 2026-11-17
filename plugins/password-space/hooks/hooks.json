@@ -8,7 +8,7 @@
     ],
     "beforeSubmitPrompt": [
       {
-        "command": "./scripts/redact.mjs"
+        "command": "./scripts/prompt-guard.mjs --format cursor"
       }
     ]
   }

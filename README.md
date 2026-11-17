@@ -1,10 +1,10 @@
 # Password Space
 
-**A local plain-text named secret store for developers and AI agents.**
+**A local named secret store for developers and AI agents, backed by your OS keychain.**
 
-Store secrets once by name in Terminal. Let agents access credentials through MCP (`inject_secret`) without pasting values into chat transcripts.
+Store secrets once by name in Terminal. Agents use them by name — `password-space run -s NAME -- <command>` puts the value straight into the command's environment — without the value ever passing through chat.
 
-> Values are stored as **local plain files** (mode `0600`) under `~/.password-space`. That keeps secrets out of chat — it does **not** hide them from anyone with access to your user account or disk. See [Security model](#security-model) and [SECURITY.md](./SECURITY.md).
+> Secret values live in the **macOS Keychain, Windows Credential Manager or Linux Secret Service**. `~/.password-space/secrets.json` keeps only names, tags and notes. On a machine with no keychain, values fall back to `secrets.json` in plain text (mode `0600`) and every status screen says so. See [Storage](#storage), [Security model](#security-model) and [SECURITY.md](./SECURITY.md).
 
 ## Why Password Space?
 
@@ -20,25 +20,27 @@ Password Space keeps **named secrets on disk**, a **Terminal-only** human path f
 
 | Feature | What it does |
 | --- | --- |
-| Plain local storage | Secrets in `secrets.json` (mode `0600`) under `~/.password-space` |
+| OS keychain storage | Values in the OS keychain; names and metadata in `secrets.json`. Plain-file fallback where no keychain exists |
 | No unlock gate | Lock / unlock / passphrase are **not** required for the happy path |
 | Metadata-only listing | `list` / MCP `list_secrets` return names, ids, tags — not values |
 | Day-1 Terminal + MCP | Terminal `setup` / `set` for secrets; MCP `vault_status`, `list_secrets`, `inject_secret` |
 | Secret injection | `inject_secret` writes a short-lived `0600` env file and returns a handle + path — not the value |
-| Redaction hook | Plugin `beforeSubmitPrompt` hook blocks outbound prompts that contain a **known** inject value |
+| Prompt hook | Cursor and Claude Code hooks block outbound prompts that contain **any stored** secret value |
+| `run` command | `password-space run -s NAME -- <cmd>` passes secrets in the command's env and redacts them from its output |
 | Bundled plugin MCP + CLI | `plugins/password-space/dist/index.js` (MCP) and `dist/cli.js` (Terminal) — Node only, no clone |
 
 ## Security model
 
 **Designed to protect:** chat/transcript plane when agents use `inject_secret` / tool-arg secrets and follow the Skill (handles like `ps://NAME` instead of values).
 
-**Does not protect against:** anyone who can read your user files; plaintext on disk in `secrets.json`; plaintext in process memory, inject `*.env` files, or CLI `get` / `resolve_secret` results; hooks that are disabled, misconfigured, or incomplete.
+**Does not protect against:** malware or an agent running as your user that calls the keychain or `password-space get` itself; plaintext in process memory, inject `*.env` files, or CLI `get` / `resolve_secret` results; a command that prints its own environment when output redaction is off; hooks that are disabled. With the file fallback, anyone who can read your user files can read `secrets.json`.
 
 | Area | MVP behavior |
 | --- | --- |
-| At rest | Plain JSON at `$PASSWORD_SPACE_HOME/secrets.json`, mode `0600` |
+| At rest | Values in the OS keychain (service `password-space`). `secrets.json` (mode `0600`) has names, tags, notes and keyed fingerprints. File fallback: values in `secrets.json` |
 | Inject files | `$PASSWORD_SPACE_HOME/inject/<token>.env`, mode `0600`, default TTL **5 minutes** |
-| Redaction | Only **known** values from inject files / explicit secret lists — not a universal DLP |
+| Prompt hooks | Cursor and Claude Code prompts that contain **any stored value** are blocked (values of 6+ characters) |
+| `run` output | Values are replaced with `[REDACTED]` in the command's output when it is not a terminal |
 
 Full threat model: **[SECURITY.md](./SECURITY.md)**. Architecture: **[docs/architecture.md](./docs/architecture.md)**.
 
@@ -168,13 +170,54 @@ Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugi
 | --- | --- | --- |
 | `vault_onboard` | No | Guided next step (`primary_action`) |
 | `vault_status` | No | Store ready? Next step hint |
-| `vault_init` | No | Soft-compat: ensure store (prefer Terminal setup) |
-| `vault_unlock` / `vault_lock` | No | Soft-compat no-ops (not required) |
 | `vault_set_secret` | **No** (metadata only) | Prefer Terminal `set` for humans |
 | `list_secrets` | No | Discover names / ids / tags |
 | `get_secret_metadata` | No | One secret’s metadata |
-| `inject_secret` | **No** (writes env file) | **Preferred** agent access by name |
+| `inject_secret` | **No** (writes env file) | Agent access by name when the CLI `run` command cannot be used |
 | `resolve_secret` | Yes, if `confirm_redaction: true` | Last resort only |
+
+## Storage
+
+| Platform | Where values go | Tool used (no native Node addon) |
+| --- | --- | --- |
+| macOS | Login Keychain, service `password-space` | `/usr/bin/security` |
+| Windows | Credential Manager, targets `password-space:*` | `powershell.exe` calling `advapi32` `Cred*` |
+| Linux | Secret Service (GNOME Keyring, KWallet, ...) | `secret-tool` from `libsecret-tools` |
+
+Values are always passed to these tools on stdin, never on the command line. Windows limits one
+credential to 2,560 bytes and the macOS helper to about 1,900 bytes; longer values (such as
+large PEM keys) are refused with a clear error. Use `PASSWORD_SPACE_STORAGE=file` for those.
+`setup` picks the backend once, when it creates the store:
+
+- `PASSWORD_SPACE_STORAGE=auto` (default): use the keychain if a test write works, else fall back to plain `secrets.json` and show why.
+- `PASSWORD_SPACE_STORAGE=keychain`: fail instead of falling back.
+- `PASSWORD_SPACE_STORAGE=file`: never use the keychain (plain text on disk).
+
+`password-space status` shows which one is in use.
+
+**Upgrading from plain `secrets.json`.** Existing stores keep working as they are. Run
+`password-space migrate` (or answer yes when `setup` offers it) to move every value into the
+keychain. Each value is written, read back and compared before `secrets.json` is rewritten
+without values; if anything fails, the file is left as it was. `password-space migrate --to file`
+moves values back.
+
+**Linux without a desktop session** (servers, containers, WSL) usually has no Secret Service, so
+the store falls back to the file. Install `libsecret-tools` and run `gnome-keyring-daemon` inside a
+D-Bus session if you want the keychain there.
+
+## Running commands with secrets
+
+```bash
+password-space run -s GITHUB_TOKEN -- gh repo list
+password-space run -s OPENAI_API_KEY=openai-prod -s DATABASE_URL -- npm test
+password-space run --all -- ./deploy.sh
+```
+
+`run` reads the named secrets and starts the command (without a shell) with them in its
+environment. The agent only ever sees the secret's name. When output is not a terminal, which
+is how agents run commands, any secret value the command prints is replaced with `[REDACTED]`;
+`--no-redact` turns that off. Agents should prefer `run` to `inject_secret`, which writes the
+value to a temporary file.
 
 ## Secret-injection lifecycle
 
@@ -201,12 +244,12 @@ Avoid CLI `get` and MCP `resolve_secret` in agent workflows — both can put pla
 
 ```mermaid
 flowchart TB
-  Human[Human + Terminal CLI] -->|setup / set / remove| Store[(secrets.json plain)]
+  Human[Human + Terminal CLI] -->|setup / set / remove| Store[(secrets.json names + OS keychain values)]
   Agent[Agent + Skill] -->|list / metadata / inject| MCP[Bundled MCP]
   MCP --> Store
   MCP -->|env file handle| Inject[inject/*.env]
   Agent -->|consume outside chat| Inject
-  Hook[redact.mjs hook] -->|strip known values| Chat[Chat transcript]
+  Hook[prompt-guard.mjs hook] -->|block stored values| Chat[Chat transcript]
   Agent -.->|prefer handles only| Chat
 ```
 
@@ -217,11 +260,9 @@ Detail: [docs/architecture.md](./docs/architecture.md).
 Older releases used an encrypted SQLite `vault.db` plus unlock sessions. That file is **never deleted or auto-migrated**.
 
 1. Keep your old `~/.password-space/vault.db` as a backup if you still need it.
-2. Run Terminal `setup` to create `secrets.json`.
+2. Run Terminal `setup` to create the new store.
 3. Re-add each secret with Terminal `set` (name + hidden value).
-4. Ask the agent to use secrets by name via `inject_secret`.
-
-The old crypto and unlock-session code is still in the repo but off the product path. See [docs/LEGACY_CODE.md](./docs/LEGACY_CODE.md).
+4. Ask the agent to use secrets by name (`run -s NAME -- <command>`).
 
 ## Troubleshooting
 
@@ -241,7 +282,7 @@ pnpm install && pnpm build && pnpm test
 
 | Path | Role |
 | --- | --- |
-| `packages/vault` | Plain store, inject, redact |
+| `packages/vault` | Store, OS keychain backends, prompt guard, inject, redact |
 | `packages/cli` | Human Terminal CLI |
 | `packages/mcp-server` | MCP server sources (bundled into the plugin) |
 | `plugins/password-space` | Cursor and Claude Code plugin (bundled MCP + CLI + skill + hooks + logo) |

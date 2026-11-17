@@ -30,7 +30,7 @@
 | --- | --- |
 | Full e2e in live Cursor chat iframe | Requires host interactive session; App HTML + tool contracts covered in unit tests |
 | At-rest encryption / OS keychain | Product decision: keep secrets out of chat, not off disk. Revisit only with an explicit product call (see CONTRIBUTING.md) |
-| Removing legacy crypto/session code and soft-compat tools | Listed in [LEGACY_CODE.md](./LEGACY_CODE.md); kept for compatibility for now |
+| Removing legacy crypto/session code and soft-compat tools | Done: removed along with the no-op MCP tools |
 | Per-secret MCP ACLs | Out of MVP scope |
 | Package-level ESLint config | `lint --if-present` no-ops |
 
