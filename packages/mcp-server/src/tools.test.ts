@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { VaultStore, openVault } from "@password-space/vault";
+import { VaultStore, openVault, secretsStorePath, vaultDbPath } from "@password-space/vault";
 import {
   assertNoPlaintext,
   checkPrerequisites,
@@ -44,19 +44,18 @@ function tempDir(): string {
   return dir;
 }
 
-async function unlockedStore(): Promise<{ dir: string; store: VaultStore; value: string }> {
+function readyStore(): { dir: string; store: VaultStore; value: string } {
   const dir = tempDir();
-  const store = new VaultStore(join(dir, "vault.db"));
-  await store.init("test-passphrase-ok");
-  await store.unlock("test-passphrase-ok");
+  const store = new VaultStore(secretsStorePath(dir));
+  store.ensure();
   const value = "mcp-secret-value-SHOULD-NOT-LEAK";
   store.setSecret({ name: "DEMO_KEY", value, tags: ["demo"] });
   return { dir, store, value };
 }
 
 describe("MCP tools contract", () => {
-  it("list_secrets returns names only", async () => {
-    const { store, value } = await unlockedStore();
+  it("list_secrets returns names only", () => {
+    const { store, value } = readyStore();
     const result = listSecretsTool(store);
     assertNoPlaintext(result, value);
     const parsed = JSON.parse(result.content[0]!.text) as {
@@ -68,15 +67,15 @@ describe("MCP tools contract", () => {
     store.close();
   });
 
-  it("get_secret_metadata has no value", async () => {
-    const { store, value } = await unlockedStore();
+  it("get_secret_metadata has no value", () => {
+    const { store, value } = readyStore();
     const result = getSecretMetadataTool(store, "DEMO_KEY");
     assertNoPlaintext(result, value);
     store.close();
   });
 
-  it("inject_secret returns handle without plaintext", async () => {
-    const { dir, store, value } = await unlockedStore();
+  it("inject_secret returns handle without plaintext", () => {
+    const { dir, store, value } = readyStore();
     const result = injectSecretTool(store, dir, { name: "DEMO_KEY" });
     assertNoPlaintext(result, value);
     const parsed = JSON.parse(result.content[0]!.text) as {
@@ -90,8 +89,8 @@ describe("MCP tools contract", () => {
     store.close();
   });
 
-  it("resolve_secret requires confirm_redaction", async () => {
-    const { store, value } = await unlockedStore();
+  it("resolve_secret requires confirm_redaction", () => {
+    const { store, value } = readyStore();
     const denied = resolveSecretTool(store, { name: "DEMO_KEY" });
     assertNoPlaintext(denied, value);
     const allowed = resolveSecretTool(store, { name: "DEMO_KEY", confirm_redaction: true });
@@ -101,10 +100,10 @@ describe("MCP tools contract", () => {
     store.close();
   });
 
-  it("list fails when locked", async () => {
-    const { store } = await unlockedStore();
+  it("list works without unlock session", () => {
+    const { store } = readyStore();
     store.lock();
-    expect(() => listSecretsTool(store)).toThrow(/locked/i);
+    expect(() => listSecretsTool(store)).not.toThrow();
     store.close();
   });
 });
@@ -118,52 +117,49 @@ describe("vault lifecycle MCP tools", () => {
     expect(() => resolvePassphrase("short")).toThrow(/8 character/i);
   });
 
-  it("vault_status reports uninitialized vault with next_steps and prerequisites", () => {
+  it("vault_status reports uninitialized store with next_steps", () => {
     const dir = tempDir();
-    const store = new VaultStore(join(dir, "vault.db"));
+    const store = new VaultStore(secretsStorePath(dir));
     const result = vaultStatusTool(store, dir);
     const parsed = JSON.parse(result.content[0]!.text) as {
       initialized: boolean;
       unlocked: boolean;
       next: string;
       setup_state: string;
+      storage: string;
+      lock_unlock_needed: boolean;
       prerequisites: { node_ok: boolean; required_node: string };
       primary_action: { id: string; copy_paste_command?: string };
       recommended_path: string | null;
-      host_limitation?: string;
       next_steps: Array<{ tool?: string }>;
     };
     expect(parsed.initialized).toBe(false);
-    expect(parsed.unlocked).toBe(false);
     expect(parsed.setup_state).toBe("needs_init");
+    expect(parsed.storage).toBe("plain-json");
+    expect(parsed.lock_unlock_needed).toBe(false);
     expect(parsed.prerequisites.node_ok).toBe(true);
     expect(parsed.prerequisites.required_node).toBe(`>=${MIN_NODE_MAJOR}`);
     expect(parsed.primary_action.id).toBe("cli_setup");
     expect(parsed.recommended_path).toBe("cli_setup");
-    expect(parsed.host_limitation).toMatch(/empty \{\}/i);
     expect(parsed.next).toMatch(/Terminal|copy_paste|setup/i);
     expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("setup"));
-    expect(parsed.primary_action.copy_paste_command).toContain("cli.js");
     expect(parsed.next_steps.some((s) => s.tool === "cli_setup")).toBe(true);
     store.close();
   });
 
-  it("buildPrimaryAction prefers cli_setup when vault missing and no env", () => {
+  it("buildPrimaryAction prefers cli_setup when store missing", () => {
     const action = buildPrimaryAction(false, false, false);
     expect(action.id).toBe("cli_setup");
     expect(action.recommended_path).toBe("cli_setup");
     expect(action.mcp_tool).toBeUndefined();
     expect(action.copy_paste_command).toBe(bundledCliCommand("setup"));
     expect(action.copy_paste_command).toMatch(/cli\.js/);
-    expect(action.host_limitation).toMatch(/empty \{\}/i);
-    expect(action.never).toMatch(/ready/i);
-    expect(action.alternatives?.some((a) => a.id === "mcp_env")).toBe(true);
     expect(action.advanced_escape_hatch?.cli_command).toBe(
       CLI_SETUP_COMMANDS.from_clone_optional,
     );
   });
 
-  it("buildPrimaryAction prefers cli_set when vault ready", () => {
+  it("buildPrimaryAction prefers cli_set when store ready", () => {
     const action = buildPrimaryAction(true, true, true);
     expect(action.id).toBe("cli_set");
     expect(action.recommended_path).toBe("cli_set");
@@ -175,14 +171,6 @@ describe("vault lifecycle MCP tools", () => {
     expect(CLI_SETUP_COMMANDS.plugin_unlock).toBe(`${BUNDLED_CLI_NODE} unlock`);
     expect(CLI_SETUP_COMMANDS.plugin_set).toBe(`${BUNDLED_CLI_NODE} set`);
     expect(CLI_SETUP_COMMANDS.plugin_setup).toContain("${CURSOR_PLUGIN_ROOT}/dist/cli.js");
-  });
-
-  it("buildPrimaryAction prefers vault_init_env when PASSWORD_SPACE_PASSPHRASE set", () => {
-    process.env.PASSWORD_SPACE_PASSPHRASE = "env-passphrase-xx";
-    const action = buildPrimaryAction(false, false, false);
-    expect(action.id).toBe("vault_init_env");
-    expect(action.mcp_tool).toBe("vault_init");
-    expect(action.recommended_path).toBe("mcp_env");
   });
 
   it("buildPrimaryAction returns fix_node when prereq fails", () => {
@@ -202,22 +190,22 @@ describe("vault lifecycle MCP tools", () => {
 
   it("vault_onboard returns cli_setup primary_action for newcomers", () => {
     const dir = tempDir();
-    const store = new VaultStore(join(dir, "vault.db"));
+    const store = new VaultStore(secretsStorePath(dir));
     const result = vaultOnboardTool(store, dir);
     const parsed = JSON.parse(result.content[0]!.text) as {
       checklist: Array<{ id: string; done: boolean }>;
       human_summary: string;
       setup_state: string;
+      storage: string;
+      lock_unlock_needed: boolean;
       primary_action: {
         id: string;
         do_this: string;
         mcp_tool?: string;
         copy_paste_command?: string;
         recommended_path?: string;
-        advanced_escape_hatch?: { when: string };
       };
       recommended_path: string | null;
-      host_limitation?: string;
       copy_paste_command?: string;
       what_to_do: string[];
       never_do: string[];
@@ -227,92 +215,112 @@ describe("vault lifecycle MCP tools", () => {
       progress: { phase: string };
       trust_line: string;
     };
-    expect(parsed.checklist.length).toBeGreaterThan(3);
+    expect(parsed.checklist.length).toBeGreaterThan(2);
     expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
     expect(parsed.human_summary).toMatch(/Terminal|Welcome|Password Space/i);
-    expect(parsed.progress.phase).toMatch(/\d\/4/);
-    expect(parsed.trust_line).toMatch(/encrypted/i);
+    expect(parsed.trust_line).toMatch(/plain/i);
+    expect(parsed.storage).toBe("plain-json");
+    expect(parsed.lock_unlock_needed).toBe(false);
     expect(parsed.setup_state).toBe("needs_init");
     expect(parsed.primary_action.id).toBe("cli_setup");
     expect(parsed.recommended_path).toBe("cli_setup");
     expect(parsed.primary_action.mcp_tool).toBeUndefined();
-    expect(parsed.host_limitation).toMatch(/empty \{\}/i);
     expect(parsed.copy_paste_command).toBe(bundledCliCommand("setup"));
     expect(parsed.primary_action.do_this).toMatch(/Terminal|copy_paste/i);
     expect(parsed.what_to_do).toHaveLength(1);
-    expect(parsed.never_do.some((n) => /ready/i.test(n))).toBe(true);
+    expect(parsed.never_do.some((n) => /chat/i.test(n))).toBe(true);
     expect(parsed.elicitation_note).toMatch(/never via MCP elicitation/i);
     expect(parsed.never_edit).toContain("mcp.json");
-    expect(parsed.recovery.howToFix).toMatch(/Terminal|password-space setup/i);
+    expect(parsed.recovery.howToFix).toMatch(/Terminal|setup/i);
     store.close();
   });
 
-  it("vault_onboard guides cli_unlock when vault already exists", async () => {
+  it("vault_onboard guides cli_set when store already exists", async () => {
     const dir = tempDir();
-    const store = new VaultStore(join(dir, "vault.db"));
-    await store.init("existing-vault-pass");
-    store.lock();
+    const store = new VaultStore(secretsStorePath(dir));
+    await store.init();
     const result = vaultOnboardTool(store, dir);
     const parsed = JSON.parse(result.content[0]!.text) as {
       setup_state: string;
       primary_action: { id: string; mcp_tool?: string; copy_paste_command?: string };
       recommended_path: string | null;
-      recovery: { code: string; howToFix: string };
+      recovery: { code: string };
       human_summary: string;
+      lock_unlock_needed: boolean;
     };
-    expect(parsed.setup_state).toBe("needs_unlock");
-    expect(parsed.primary_action.id).toBe("cli_unlock");
-    expect(parsed.recommended_path).toBe("cli_unlock");
-    expect(parsed.primary_action.mcp_tool).toBeUndefined();
-    expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("unlock"));
-    expect(parsed.recovery.code).toBe("vault_locked");
-    expect(parsed.recovery.howToFix).toMatch(/do not run vault_init/i);
-    expect(parsed.human_summary).toMatch(/already exists/i);
+    expect(parsed.setup_state).toBe("ready");
+    expect(parsed.primary_action.id).toBe("cli_set");
+    expect(parsed.recommended_path).toBe("cli_set");
+    expect(parsed.lock_unlock_needed).toBe(false);
+    expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("set"));
+    expect(parsed.recovery.code).toBe("ready");
+    expect(parsed.human_summary).toMatch(/ready|inject/i);
     store.close();
   });
 
-  it("PassphraseRequiredError carries host_limitation and cli_setup path", () => {
+  it("vault_onboard notes legacy encrypted vault without wiping it", () => {
+    const dir = tempDir();
+    writeFileSync(vaultDbPath(dir), "legacy-encrypted-placeholder");
+    const store = new VaultStore(secretsStorePath(dir));
+    const result = vaultOnboardTool(store, dir);
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      legacy_encrypted_vault: boolean;
+      recovery: { code: string; howToFix: string };
+      human_summary: string;
+    };
+    expect(parsed.legacy_encrypted_vault).toBe(true);
+    expect(parsed.recovery.code).toBe("legacy_encrypted_vault");
+    expect(parsed.recovery.howToFix).toMatch(/untouched|re-add/i);
+    expect(parsed.human_summary).toMatch(/legacy|untouched/i);
+    store.close();
+  });
+
+  it("PassphraseRequiredError carries Terminal path", () => {
     const err = new PassphraseRequiredError();
     expect(err.code).toBe("passphrase_missing");
     expect(err.recommended_path).toBe("cli_setup");
-    expect(err.host_limitation).toMatch(/empty \{\}/i);
-    expect(err.message).toMatch(/empty \{\}/i);
-    expect(err.message).toMatch(/Terminal|password-space setup/i);
+    expect(err.message).toMatch(/Terminal|setup/i);
   });
 
-  it("vault_init → unlock → set_secret without leaking secrets", async () => {
+  it("vault_init → set_secret without unlock or leaking secrets", async () => {
     const dir = tempDir();
-    const passphrase = "setup-ux-passphrase";
     const secretValue = "store-me-BUT-NEVER-LEAK-xyz";
 
-    const initStore = new VaultStore(join(dir, "vault.db"));
-    const initResult = await vaultInitTool(initStore, dir, { passphrase });
-    assertNoPlaintext(initResult, passphrase);
-    const initParsed = JSON.parse(initResult.content[0]!.text) as { ok: boolean; initialized: boolean };
+    const initStore = new VaultStore(secretsStorePath(dir));
+    const initResult = await vaultInitTool(initStore, dir, {});
+    const initParsed = JSON.parse(initResult.content[0]!.text) as {
+      ok: boolean;
+      initialized: boolean;
+      unlocked: boolean;
+      lock_unlock_needed: boolean;
+    };
     expect(initParsed.ok).toBe(true);
     expect(initParsed.initialized).toBe(true);
+    expect(initParsed.unlocked).toBe(true);
+    expect(initParsed.lock_unlock_needed).toBe(false);
     initStore.close();
 
-    const unlockResult = await vaultUnlockTool(dir, { passphrase, ttl_hours: 1 });
-    assertNoPlaintext(unlockResult, passphrase);
+    const unlockResult = await vaultUnlockTool(dir, {});
     const unlockParsed = JSON.parse(unlockResult.content[0]!.text) as {
       ok: boolean;
       unlocked: boolean;
-      expires_at: string;
+      deprecated: boolean;
     };
     expect(unlockParsed.ok).toBe(true);
     expect(unlockParsed.unlocked).toBe(true);
-    expect(unlockParsed.expires_at).toBeTruthy();
+    expect(unlockParsed.deprecated).toBe(true);
 
-    const store = openVault({ dataDir: dir, useSession: true });
+    const store = openVault({ dataDir: dir });
     expect(store.isUnlocked).toBe(true);
     const status = vaultStatusTool(store, dir);
     const statusParsed = JSON.parse(status.content[0]!.text) as {
       initialized: boolean;
       unlocked: boolean;
+      storage: string;
     };
     expect(statusParsed.initialized).toBe(true);
     expect(statusParsed.unlocked).toBe(true);
+    expect(statusParsed.storage).toBe("plain-json");
 
     const setResult = vaultSetSecretTool(store, {
       name: "API_TOKEN",
@@ -320,7 +328,6 @@ describe("vault lifecycle MCP tools", () => {
       tags: ["api", "demo"],
     });
     assertNoPlaintext(setResult, secretValue);
-    assertNoPlaintext(setResult, passphrase);
     const setParsed = JSON.parse(setResult.content[0]!.text) as {
       ok: boolean;
       secret: { name: string; value?: string; tags: string[] };
@@ -335,16 +342,21 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
 
     const lockResult = vaultLockTool(dir);
-    const lockParsed = JSON.parse(lockResult.content[0]!.text) as { locked: boolean };
-    expect(lockParsed.locked).toBe(true);
+    const lockParsed = JSON.parse(lockResult.content[0]!.text) as {
+      deprecated: boolean;
+      note: string;
+    };
+    expect(lockParsed.deprecated).toBe(true);
+    expect(lockParsed.note).toMatch(/no-op|not needed|plain/i);
 
-    const locked = openVault({ dataDir: dir, useSession: true });
-    expect(locked.isUnlocked).toBe(false);
-    locked.close();
+    const again = openVault({ dataDir: dir });
+    expect(again.isUnlocked).toBe(true);
+    expect(again.getSecret("API_TOKEN").value).toBe(secretValue);
+    again.close();
   });
 
-  it("vault_manager returns secrets metadata without plaintext", async () => {
-    const { dir, store, value } = await unlockedStore();
+  it("vault_manager returns secrets metadata without plaintext", () => {
+    const { dir, store, value } = readyStore();
     const result = vaultManagerTool(store, dir);
     assertNoPlaintext(result, value);
     const parsed = JSON.parse(result.content[0]!.text) as {
@@ -363,16 +375,16 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.agent_contract).toMatch(/Terminal/i);
     expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
     expect(result.content[0]!.text).not.toMatch(/<!DOCTYPE html>/i);
-    expect(result.content[0]!.text).not.toMatch(/ZodError|invalid_union/);
     expect(parsed.secrets[0]?.name).toBe("DEMO_KEY");
     expect(parsed.secrets[0]?.value).toBeUndefined();
     expect(parsed.capabilities.remove).toMatch(/Terminal remove/i);
+    expect(parsed.capabilities.unlock).toMatch(/Not needed/i);
     store.close();
   });
 
-  it("vault_manager apps_fallback recommends cli_setup when vault missing", () => {
+  it("vault_manager apps_fallback recommends cli_setup when store missing", () => {
     const dir = tempDir();
-    const store = new VaultStore(join(dir, "vault.db"));
+    const store = new VaultStore(secretsStorePath(dir));
     const result = vaultManagerTool(store, dir);
     const parsed = JSON.parse(result.content[0]!.text) as {
       apps_fallback: {
@@ -380,77 +392,63 @@ describe("vault lifecycle MCP tools", () => {
         next_tool: string;
         never?: string[];
       };
-      host_limitation?: string;
     };
     expect(parsed.apps_fallback.recommended_path).toBe("cli_setup");
     expect(parsed.apps_fallback.next_tool).toBe("cli_setup");
     expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
-    expect(parsed.host_limitation).toMatch(/empty \{\}/i);
     store.close();
   });
 
-  it("vault_delete_secret removes without leaking", async () => {
-    const { store, value } = await unlockedStore();
+  it("vault_delete_secret removes without leaking", () => {
+    const { store, value } = readyStore();
     const result = vaultDeleteSecretTool(store, "DEMO_KEY");
     assertNoPlaintext(result, value);
     expect(store.listSecrets()).toHaveLength(0);
     store.close();
   });
 
-  it("vault_change_passphrase keeps secrets and refreshes session", async () => {
+  it("vault_change_passphrase reports deprecated", async () => {
     const dir = tempDir();
-    const store = new VaultStore(join(dir, "vault.db"));
-    await store.init("change-pass-old-1");
-    store.close();
-    await vaultUnlockTool(dir, { passphrase: "change-pass-old-1", ttl_hours: 1 });
-    const unlocked = openVault({ dataDir: dir, useSession: true });
-    unlocked.setSecret({ name: "X", value: "token-keep-me" });
-    unlocked.close();
-
     const result = await vaultChangePassphraseTool(dir, {
       current_passphrase: "change-pass-old-1",
       new_passphrase: "change-pass-new-2",
-      ttl_hours: 1,
     });
-    assertNoPlaintext(result, "change-pass-old-1");
-    assertNoPlaintext(result, "change-pass-new-2");
-    assertNoPlaintext(result, "token-keep-me");
-
-    const again = openVault({ dataDir: dir, useSession: true });
-    expect(again.isUnlocked).toBe(true);
-    expect(again.getSecret("X").value).toBe("token-keep-me");
-    again.close();
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      ok: boolean;
+      deprecated: boolean;
+      code: string;
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.deprecated).toBe(true);
+    expect(parsed.code).toBe("passphrase_not_used");
   });
 
-  it("vault_init accepts passphrase from env", async () => {
+  it("vault_init works without passphrase", async () => {
     const dir = tempDir();
-    process.env.PASSWORD_SPACE_PASSPHRASE = "env-only-passphrase";
-    const store = new VaultStore(join(dir, "vault.db"));
+    const store = new VaultStore(secretsStorePath(dir));
     const result = await vaultInitTool(store, dir, {});
-    assertNoPlaintext(result, "env-only-passphrase");
     expect(store.isInitialized()).toBe(true);
+    const parsed = JSON.parse(result.content[0]!.text) as { ok: boolean; storage: string };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.storage).toBe("plain-json");
     store.close();
   });
 
-  it("vault_init refuses when already initialized with unlock recovery", async () => {
+  it("vault_init when already initialized points to cli_set", async () => {
     const dir = tempDir();
-    const store = new VaultStore(join(dir, "vault.db"));
-    await store.init("already-inited-xx");
-    const result = await vaultInitTool(store, dir, { passphrase: "already-inited-xx" });
+    const store = new VaultStore(secretsStorePath(dir));
+    await store.init();
+    const result = await vaultInitTool(store, dir, {});
     const parsed = JSON.parse(result.content[0]!.text) as {
       ok: boolean;
-      error: string;
       code: string;
-      howToFix: string;
       recommended_path: string;
       primary_action: { id: string };
     };
-    expect(parsed.ok).toBe(false);
-    expect(parsed.error).toMatch(/already initialized/i);
-    expect(parsed.code).toBe("vault_already_exists");
-    expect(parsed.howToFix).toMatch(/Terminal|unlock|MCP Environment/i);
-    expect(parsed.primary_action.id).toBe("cli_unlock");
-    expect(parsed.recommended_path).toBe("cli_unlock");
+    expect(parsed.ok).toBe(true);
+    expect(parsed.code).toBe("store_already_exists");
+    expect(parsed.primary_action.id).toBe("cli_set");
+    expect(parsed.recommended_path).toBe("cli_set");
     store.close();
   });
 });

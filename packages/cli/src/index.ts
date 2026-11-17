@@ -3,18 +3,11 @@ import { createInterface } from "node:readline";
 import { stdin as input, stdout as output, exit } from "node:process";
 import {
   VaultError,
-  changeVaultPassphrase,
   defaultDataDir,
-  formatSessionExpiry,
-  hasValidSession,
-  lockVaultSession,
+  hasLegacyEncryptedVault,
   openVault,
-  parseSessionTtlInput,
-  readSession,
-  sessionPath,
-  unlockVaultToSession,
+  secretsStorePath,
   vaultDbPath,
-  type SessionTtlMs,
 } from "@password-space/vault";
 
 type Args = {
@@ -91,7 +84,7 @@ async function promptHidden(question: string): Promise<string> {
         rl.close();
         resolve(line);
       });
-      rl.once("close", () => reject(new Error("No passphrase on stdin")));
+      rl.once("close", () => reject(new Error("No value on stdin")));
     });
   }
 
@@ -131,18 +124,15 @@ async function promptHidden(question: string): Promise<string> {
 }
 
 function printHelp(): void {
-  console.log(`password-space — interactive Terminal vault (humans) + MCP for agents
+  console.log(`password-space — local plain-text named secrets (Terminal for humans, MCP for agents)
 
 Usage:
   password-space                 Interactive menu (TTY)
   password-space <command> [options]
 
 Commands:
-  setup | init           Create vault + unlock (guided)
-  unlock                 Unlock with session duration choice
-  lock                   Clear unlock session
-  status                 Vault / session status
-  change-passphrase      Re-wrap under a new passphrase
+  setup | init           Ensure the local store exists (no passphrase)
+  status                 Store status
   set | add [name]       Store or update a secret (hidden value)
   remove | delete | rm   Delete a secret (prompts for name)
   list                   List secret names only (no values)
@@ -150,14 +140,11 @@ Commands:
   onboard                Print next Terminal step
   get <name>             Print secret value (human only — not for agents)
   audit                  Recent access events (no values)
+  unlock | lock          No-ops (kept for compatibility — not needed)
   help                   Show this help
 
-Session duration (unlock / setup / change-passphrase):
-  Interactive prompt: 1 day · 1 week · until lock
-  --ttl 1d | 1w | until-lock | <hours>
-
 Options:
-  --data-dir, -d         Vault data directory (default: ~/.password-space)
+  --data-dir, -d         Data directory (default: ~/.password-space)
   --value <text>         Secret value for set (prefer prompt)
   --tags <a,b,c>         Tags for set
   --notes <text>         Notes for set
@@ -167,241 +154,105 @@ Options:
 
 Environment:
   PASSWORD_SPACE_HOME           Same as --data-dir
-  PASSWORD_SPACE_PASSPHRASE     Non-interactive unlock/init (CI / scripts)
 
-Session file:  ~/.password-space/session  (mode 0600)
-Agents use MCP inject/list while the session is valid — no passphrase re-prompt.
+Store file:  ~/.password-space/secrets.json  (mode 0600, plain values at rest)
+Agents use MCP inject_secret / list_secrets by name — never paste secrets in chat.
+Lock/unlock/passphrase are not part of the product path.
 `);
 }
 
-async function getPassphrase(flags: Record<string, string | boolean>, prompt: string): Promise<string> {
-  if (typeof flags.passphrase === "string") return flags.passphrase;
-  if (process.env.PASSWORD_SPACE_PASSPHRASE) return process.env.PASSWORD_SPACE_PASSPHRASE;
-  return promptHidden(prompt);
-}
-
-async function promptNewPassphrase(
-  flags: Record<string, string | boolean>,
-): Promise<string> {
-  const pass = await getPassphrase(flags, "Passphrase (8+ characters, hidden): ");
-  if (pass.length < 8) {
-    throw new VaultError("Passphrase must be at least 8 characters", "INVALID");
-  }
-  if (process.env.PASSWORD_SPACE_PASSPHRASE || typeof flags.passphrase === "string") {
-    return pass;
-  }
-  const confirm = await getPassphrase({}, "Confirm passphrase (hidden): ");
-  if (pass !== confirm) {
-    throw new VaultError("Passphrases do not match", "INVALID");
-  }
-  return pass;
-}
-
-/**
- * Resolve unlock TTL: flag wins; otherwise interactive menu on TTY;
- * non-TTY / env scripts keep the 8h default.
- */
-async function resolveSessionTtl(
-  flags: Record<string, string | boolean>,
-  opts: { askInteractively?: boolean } = {},
-): Promise<SessionTtlMs> {
-  if (flags.ttl !== undefined) {
-    return parseSessionTtlInput(flags.ttl);
-  }
-  const ask = opts.askInteractively !== false && input.isTTY && !process.env.PASSWORD_SPACE_PASSPHRASE;
-  if (!ask) {
-    return parseSessionTtlInput(undefined);
-  }
-  console.log(`
-How long should the vault stay unlocked?
-  1) 1 day
-  2) 1 week
-  3) Until lock  (no auto-expiry — run lock when done)
-`);
-  const choice = await promptVisible("Choose [1/2/3] (default 1): ");
-  switch (choice || "1") {
-    case "1":
-    case "d":
-    case "day":
-    case "1d":
-      return parseSessionTtlInput("1d");
-    case "2":
-    case "w":
-    case "week":
-    case "1w":
-      return parseSessionTtlInput("1w");
-    case "3":
-    case "u":
-    case "until":
-    case "until-lock":
-    case "lock":
-      return null;
-    default:
-      throw new VaultError("Choose 1 (1 day), 2 (1 week), or 3 (until lock)", "INVALID");
-  }
-}
-
-function printUnlockResult(expiresAt: string | null, dataDir: string): void {
-  console.log(`✓ Unlocked ${formatSessionExpiry(expiresAt)}`);
-  console.log(`  Session: ${sessionPath(dataDir)} (mode 0600)`);
-  console.log("  MCP agents can inject/list until expiry or you run lock.");
-}
-
-function vaultSnapshot(dataDir: string): {
+function storeSnapshot(dataDir: string): {
   initialized: boolean;
-  unlocked: boolean;
-  session: boolean;
-  expiresAt: string | null;
-  untilLock: boolean;
-  secretCount: number | null;
+  secretCount: number;
+  storePath: string;
+  legacyEncrypted: boolean;
 } {
-  const store = openVault({ dataDir, useSession: true });
+  const store = openVault({ dataDir });
   const initialized = store.isInitialized();
-  const unlocked = store.isUnlocked;
-  const sp = sessionPath(dataDir);
-  let session = false;
-  let expiresAt: string | null = null;
-  let untilLock = false;
-  if (hasValidSession(sp)) {
-    session = true;
-    try {
-      const s = readSession(sp);
-      expiresAt = s.expiresAt;
-      untilLock = s.untilLock;
-      s.vaultKey.fill(0);
-    } catch {
-      session = false;
-    }
-  }
-  const secretCount = unlocked ? store.listSecrets().length : null;
+  const secretCount = initialized ? store.listSecrets().length : 0;
   store.close();
-  return { initialized, unlocked, session, expiresAt, untilLock, secretCount };
+  return {
+    initialized,
+    secretCount,
+    storePath: secretsStorePath(dataDir),
+    legacyEncrypted: hasLegacyEncryptedVault(dataDir),
+  };
 }
 
-async function runSetupWizard(
-  dataDir: string,
-  flags: Record<string, string | boolean>,
-): Promise<void> {
+function printLegacyHint(dataDir: string): void {
+  if (!hasLegacyEncryptedVault(dataDir)) return;
+  console.log(`
+Note: A legacy encrypted vault.db was found at ${vaultDbPath(dataDir)}.
+It is left untouched. Re-add secrets with \`${selfCmd()} set\` into the new plain store.
+`);
+}
+
+async function runSetupWizard(dataDir: string): Promise<void> {
   console.log(`
 Password Space — setup
 ──────────────────────
-• Vault home: ${dataDir}
-• Passphrase stays in Terminal — never in Cursor chat
-• Unlock session: ~/.password-space/session (0600)
+• Store home: ${dataDir}
+• Plain local files (secrets.json) — values readable at rest
+• No passphrase / unlock session required
+• Name secrets in Terminal; ask the agent to use them by name
 `);
 
-  const probe = openVault({ dataDir, useSession: true });
-  const initialized = probe.isInitialized();
-  const needsUnlock = !probe.isUnlocked || !hasValidSession(sessionPath(dataDir));
-  probe.close();
-
-  let passphrase: string | undefined;
-  if (!initialized) {
-    passphrase = await promptNewPassphrase(flags);
-    const store = openVault({ dataDir, useSession: false });
-    await store.init(passphrase);
-    store.close();
-    console.log(`✓ Vault created at ${vaultDbPath(dataDir)}`);
+  const store = openVault({ dataDir });
+  const wasInit = store.isInitialized();
+  store.ensure();
+  store.close();
+  if (wasInit) {
+    console.log(`✓ Store already exists at ${secretsStorePath(dataDir)}`);
   } else {
-    console.log("✓ Vault already exists (not overwritten).");
+    console.log(`✓ Store created at ${secretsStorePath(dataDir)}`);
   }
-
-  if (!initialized || needsUnlock) {
-    const ttlMs = await resolveSessionTtl(flags);
-    const pass =
-      passphrase ??
-      (await getPassphrase(flags, "Unlock passphrase (hidden): "));
-    const { expiresAt } = await unlockVaultToSession(pass, { dataDir, ttlMs });
-    printUnlockResult(expiresAt, dataDir);
-  } else {
-    console.log("✓ Already unlocked.");
-  }
+  printLegacyHint(dataDir);
 
   console.log(`
 Next (still in Terminal — never paste values in Cursor chat):
   ${selfCmd()} set
   # or: ${selfCmd()}   → interactive menu
 
-Back in Cursor after unlock:
+Back in Cursor:
   • vault_status / list_secrets / inject_secret
 `);
-}
-
-async function runUnlock(
-  dataDir: string,
-  flags: Record<string, string | boolean>,
-): Promise<void> {
-  const store = openVault({ dataDir, useSession: false });
-  const initialized = store.isInitialized();
-  store.close();
-  if (!initialized) {
-    throw new VaultError("Vault not initialized. Run: password-space setup", "NOT_INITIALIZED");
-  }
-  const ttlMs = await resolveSessionTtl(flags);
-  const pass = await getPassphrase(flags, "Unlock passphrase (hidden): ");
-  const { expiresAt } = await unlockVaultToSession(pass, { dataDir, ttlMs });
-  printUnlockResult(expiresAt, dataDir);
-}
-
-async function runLock(dataDir: string): Promise<void> {
-  lockVaultSession({ dataDir });
-  console.log("✓ Locked. Unlock session cleared.");
-  console.log(`  (${sessionPath(dataDir)} removed)`);
 }
 
 async function runStatus(
   dataDir: string,
   flags: Record<string, string | boolean>,
 ): Promise<void> {
-  const snap = vaultSnapshot(dataDir);
+  const snap = storeSnapshot(dataDir);
   const status = {
     dataDir,
-    dbPath: vaultDbPath(dataDir),
+    storePath: snap.storePath,
     initialized: snap.initialized,
-    unlocked: snap.unlocked,
-    session: snap.session,
-    expires_at: snap.expiresAt,
-    until_lock: snap.untilLock,
+    unlocked: true,
     secretCount: snap.secretCount,
-    session_path: sessionPath(dataDir),
+    storage: "plain-json",
+    lock_unlock_needed: false,
+    legacy_encrypted_db: snap.legacyEncrypted,
+    legacy_db_path: snap.legacyEncrypted ? vaultDbPath(dataDir) : null,
   };
   if (flags.json) {
     console.log(JSON.stringify(status, null, 2));
     return;
   }
   console.log(`data dir:     ${status.dataDir}`);
-  console.log(`db:           ${status.dbPath}`);
+  console.log(`store:        ${status.storePath}`);
   console.log(`initialized:  ${status.initialized}`);
-  console.log(`unlocked:     ${status.unlocked}`);
-  console.log(`session:      ${status.session}`);
-  if (status.session) {
-    console.log(`expires:      ${formatSessionExpiry(status.expires_at)}`);
-    console.log(`session file: ${status.session_path}`);
+  console.log(`storage:      plain-json (no unlock)`);
+  console.log(`secrets:      ${status.secretCount}`);
+  if (status.legacy_encrypted_db) {
+    console.log(`legacy db:    ${status.legacy_db_path} (untouched — re-add via set)`);
   }
-  if (status.secretCount !== null) console.log(`secrets:      ${status.secretCount}`);
 }
 
-async function runChangePassphrase(
-  dataDir: string,
-  flags: Record<string, string | boolean>,
-): Promise<void> {
-  const current = await getPassphrase(flags, "Current passphrase (hidden): ");
-  const next = await promptNewPassphrase({});
-  const ttlMs = await resolveSessionTtl(flags);
-  const { expiresAt } = await changeVaultPassphrase(current, next, { dataDir, ttlMs });
-  console.log("✓ Passphrase updated.");
-  printUnlockResult(expiresAt, dataDir);
-}
-
-async function runSet(
-  dataDir: string,
-  args: Args,
-): Promise<void> {
+async function runSet(dataDir: string, args: Args): Promise<void> {
   let name = args.positional[0];
   let value: string | undefined =
     typeof args.flags.value === "string" ? args.flags.value : undefined;
 
-  // Non-TTY: one stdin blob — optional first line = name when positional missing.
   if (!input.isTTY && value === undefined) {
     const raw = (await readAllStdin()).replace(/\n$/, "");
     if (!name) {
@@ -422,8 +273,8 @@ async function runSet(
   if (!name) {
     throw new VaultError("Secret name is required", "INVALID");
   }
-  const store = openVault({ dataDir, useSession: true });
-  ensureUnlocked(store);
+  const store = openVault({ dataDir });
+  store.ensure();
   if (value === undefined) {
     value = await promptHidden(`Value for ${name} (hidden): `);
   }
@@ -446,12 +297,12 @@ async function runSet(
   }
 }
 
-async function runRemove(
-  dataDir: string,
-  args: Args,
-): Promise<void> {
-  const store = openVault({ dataDir, useSession: true });
-  ensureUnlocked(store);
+async function runRemove(dataDir: string, args: Args): Promise<void> {
+  const store = openVault({ dataDir });
+  if (!store.isInitialized()) {
+    store.close();
+    throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
+  }
   let name = args.positional[0];
   if (!name) {
     const list = store.listSecrets();
@@ -485,8 +336,12 @@ async function runList(
   dataDir: string,
   flags: Record<string, string | boolean>,
 ): Promise<void> {
-  const store = openVault({ dataDir, useSession: true });
-  ensureUnlocked(store);
+  const store = openVault({ dataDir });
+  if (!store.isInitialized()) {
+    store.close();
+    console.log("(no store yet — run setup or set)");
+    return;
+  }
   const tag = typeof flags.tag === "string" ? flags.tag : undefined;
   const list = store.listSecrets(tag);
   store.close();
@@ -512,63 +367,46 @@ async function runInteractiveMenu(
   }
 
   for (;;) {
-    const snap = vaultSnapshot(dataDir);
-    const unlockLine = snap.session
-      ? `unlocked · ${formatSessionExpiry(snap.expiresAt)}`
-      : snap.initialized
-        ? "locked"
-        : "not created";
+    const snap = storeSnapshot(dataDir);
     console.log(`
 Password Space
 ──────────────
-Vault:  ${dataDir}
-Status: ${unlockLine}${snap.secretCount !== null ? ` · ${snap.secretCount} secret(s)` : ""}
+Store:  ${dataDir}
+Status: ${snap.initialized ? `ready · ${snap.secretCount} secret(s)` : "not created"} · plain text (no unlock)
 
-  1) Setup / create vault
-  2) Unlock
-  3) Lock
-  4) Add secret
-  5) Remove secret
-  6) List secrets
-  7) Status
-  8) Change passphrase
-  9) Quit
+  1) Setup / ensure store
+  2) Add secret
+  3) Remove secret
+  4) List secrets
+  5) Status
+  6) Quit
 `);
-    const choice = await promptVisible("Choose [1-9]: ");
+    const choice = await promptVisible("Choose [1-6]: ");
     try {
       switch (choice) {
         case "1":
-          await runSetupWizard(dataDir, flags);
+          await runSetupWizard(dataDir);
           break;
         case "2":
-          await runUnlock(dataDir, flags);
-          break;
-        case "3":
-          await runLock(dataDir);
-          break;
-        case "4":
           await runSet(dataDir, { command: "set", positional: [], flags });
           break;
-        case "5":
+        case "3":
           await runRemove(dataDir, { command: "remove", positional: [], flags });
           break;
-        case "6":
+        case "4":
           await runList(dataDir, flags);
           break;
-        case "7":
+        case "5":
           await runStatus(dataDir, flags);
           break;
-        case "8":
-          await runChangePassphrase(dataDir, flags);
-          break;
-        case "9":
+        case "6":
         case "q":
         case "quit":
         case "exit":
           console.log("Bye.");
           return;
         default:
-          console.log("Enter a number 1–9.");
+          console.log("Enter a number 1–6.");
       }
     } catch (err) {
       if (err instanceof VaultError) {
@@ -588,7 +426,6 @@ async function main(): Promise<void> {
   const dataDir = dataDirFrom(args.flags);
   let command = args.command;
 
-  // Bare invocation → interactive menu on TTY
   if (!command || command === "menu" || command === "interactive") {
     if (!command && !input.isTTY) {
       printHelp();
@@ -610,57 +447,40 @@ async function main(): Promise<void> {
         break;
 
       case "setup":
-      case "init": {
-        // `init` alone creates without unlock when --no-unlock; keep setup as create+unlock.
-        if (command === "init" && args.flags["create-only"]) {
-          const store = openVault({ dataDir, useSession: false });
-          if (store.isInitialized()) {
-            store.close();
-            throw new VaultError("Vault already initialized", "ALREADY_INITIALIZED");
-          }
-          const pass = await promptNewPassphrase(args.flags);
-          await store.init(pass);
-          store.close();
-          console.log(`Vault initialized at ${vaultDbPath(dataDir)}`);
-          console.log("Next: password-space unlock");
-          break;
-        }
-        await runSetupWizard(dataDir, args.flags);
+      case "init":
+        await runSetupWizard(dataDir);
         break;
-      }
 
       case "onboard": {
-        const snap = vaultSnapshot(dataDir);
+        const snap = storeSnapshot(dataDir);
         if (!snap.initialized) {
           console.log("Password Space — next step\n");
           console.log("  Open Terminal and run (plugin-bundled CLI — no clone):");
           console.log('    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup');
           console.log(`    (or: ${selfCmd()} setup)`);
-          console.log("\n  You will choose unlock duration: 1 day · 1 week · until lock.");
-          console.log("  Optional scripts: PASSWORD_SPACE_PASSPHRASE in MCP Environment.");
+          console.log("\n  Then add a named secret:");
+          console.log('    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
           break;
         }
-        if (!snap.unlocked || !snap.session) {
-          console.log('Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" unlock');
-          console.log("  Choose session duration at the prompt.");
-          break;
-        }
-        console.log('Vault ready. Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
+        console.log('Store ready. Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
         console.log("  Or run without args for the interactive menu.");
         console.log("  Then in Cursor: vault_status / list_secrets / inject_secret");
+        printLegacyHint(dataDir);
         break;
       }
 
       case "unlock":
-        await runUnlock(dataDir, args.flags);
+        console.log("✓ Unlock not needed — the store is local plain text.");
+        console.log("  Add secrets with set; agents use inject_secret by name.");
         break;
 
       case "lock":
-        await runLock(dataDir);
+        console.log("✓ Lock not needed — the store stays readable locally.");
+        console.log("  (No unlock session is used.)");
         break;
 
       case "change-passphrase":
-        await runChangePassphrase(dataDir, args.flags);
+        console.log("Passphrases are not used. The store is local plain text.");
         break;
 
       case "status":
@@ -675,8 +495,11 @@ async function main(): Promise<void> {
       case "get": {
         const name = args.positional[0];
         if (!name) throw new VaultError("Usage: password-space get <name>", "INVALID");
-        const store = openVault({ dataDir, useSession: true });
-        ensureUnlocked(store);
+        const store = openVault({ dataDir });
+        if (!store.isInitialized()) {
+          store.close();
+          throw new VaultError("Store not initialized. Run: password-space setup", "NOT_INITIALIZED");
+        }
         const secret = store.getSecret(name, "human-cli");
         store.close();
         if (args.flags.json) {
@@ -699,8 +522,12 @@ async function main(): Promise<void> {
         break;
 
       case "audit": {
-        const store = openVault({ dataDir, useSession: true });
-        ensureUnlocked(store);
+        const store = openVault({ dataDir });
+        if (!store.isInitialized()) {
+          store.close();
+          console.log("(no store yet)");
+          break;
+        }
         const events = store.listAudit(50);
         store.close();
         if (args.flags.json) {
@@ -724,15 +551,6 @@ async function main(): Promise<void> {
       exit(1);
     }
     throw err;
-  }
-}
-
-function ensureUnlocked(store: ReturnType<typeof openVault>): void {
-  if (!store.isInitialized()) {
-    throw new VaultError("Vault not initialized. Run: password-space setup", "NOT_INITIALIZED");
-  }
-  if (!store.isUnlocked) {
-    throw new VaultError("Vault is locked. Run: password-space unlock", "LOCKED");
   }
 }
 

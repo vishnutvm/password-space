@@ -2,40 +2,36 @@
 
 ## Threat model (MVP summary)
 
-Password Space is a **local-only** encrypted credential vault. There is no cloud sync server in this MVP.
+Password Space is a **local-only** plain-text named secret store. There is no cloud sync server in this MVP.
 
 | Principal | May see plaintext? |
 | --- | --- |
-| Human owner after unlock | Yes (CLI `get`) |
+| Human owner (CLI `get`) | Yes |
 | Agent process via MCP `inject_secret` / confirmed `resolve_secret` | Ephemerally, for requested secrets |
-| Chat / transcript store | **Goal: no** — design + Skill + optional hook reduce exposure; not an absolute guarantee across every client, log, or screenshot |
-| Disk dump while locked | No (AES-256-GCM ciphertext + scrypt-wrapped vault key) |
-| Disk dump while unlocked session file exists | **Yes** — session is equivalent to an unlocked password manager |
-| Same OS user with access to the account | May read session / inject files / process memory while unlocked — `0600` is not a multi-user authz model |
-| Attacker who knows the unlock passphrase | Yes |
+| Chat / transcript store | **Goal: no** — design + Skill + optional hook reduce exposure; not an absolute guarantee |
+| Disk dump of `secrets.json` | **Yes** — values are plain at rest (mode `0600`) |
+| Same OS user with access to the account | May read store / inject files / process memory — `0600` is not a multi-user authz model |
 
-### Crypto (MVP)
+### Storage (MVP)
 
 | Topic | Detail |
 | --- | --- |
-| KDF | scrypt via Node.js `crypto.scrypt` — N=2¹⁵, r=8, p=1; random 32-byte salt per vault |
-| AEAD | AES-256-GCM; random 12-byte IV per encryption; auth tag verified on decrypt |
-| At rest | Random 32-byte vault key wrapped by passphrase-derived key; each secret encrypted under the vault key |
-| Unlock session | Vault key wrapped and stored under `$PASSWORD_SPACE_HOME/session` with mode `0600`; CLI duration 1d / 1w / until-lock (scripts default 8h) |
+| At rest | `$PASSWORD_SPACE_HOME/secrets.json` (default `~/.password-space`), mode `0600`, plain values |
 | Inject files | Short-lived env files under `inject/` with mode `0600` (default TTL metadata 5 minutes) |
+| Lock / unlock | **Not used** for the product path — soft-compat tools may no-op |
 
-We do **not** invent cryptographic primitives. Lost unlock passphrase = **data unrecoverable** (no recovery kit in MVP).
+This product prioritizes **keeping secrets out of chat** over at-rest encryption. If you need ciphertext at rest, use a dedicated password manager.
 
 ### Plaintext boundaries
 
-Decrypted values can exist in:
+Values can exist in:
 
+- `secrets.json` on disk
 - CLI/`get` and MCP `resolve_secret` tool results
 - Process memory while a secret is handled
-- Inject `*.env` files until deleted (expired files are cleaned on unlock/inject/lock)
-- An unlocked session file on disk
+- Inject `*.env` files until deleted
 
-Minimize lifetime: prefer `inject_secret`, delete inject files after use, run `password-space lock` when idle. Repeated wrong unlock attempts are rate-limited locally.
+Minimize lifetime: prefer `inject_secret`, delete inject files after use.
 
 ### MCP access
 
@@ -45,7 +41,7 @@ Minimize lifetime: prefer `inject_secret`, delete inject files after use, run `p
 | `inject_secret` | Writes plaintext to a local env file; tool JSON omits the value |
 | `resolve_secret` | Yes, only with `confirm_redaction: true` |
 
-There is **no per-secret ACL** in MVP: any caller that can talk to the unlocked MCP server can request any secret by name.
+There is **no per-secret ACL** in MVP: any caller that can talk to the MCP server can request any secret by name.
 
 ### Redaction
 
@@ -54,33 +50,19 @@ The hook redacts **known** values (primarily from inject files / explicit lists)
 ### Trust boundaries
 
 ```text
-┌─────────────┐     unlock      ┌──────────────────┐
-│ Human + CLI │ ──────────────► │ Local vault.db   │
-└─────────────┘                 │ (ciphertext)     │
-                                └────────┬─────────┘
-                                         │ session
-                                ┌────────▼─────────┐
-                                │ MCP server       │──► inject env file
-                                └────────┬─────────┘
-                                         │ metadata / handles in chat (goal)
-                                ┌────────▼─────────┐
-                                │ Agent + Skill    │
-                                └────────┬─────────┘
-                                         │
-                                ┌────────▼─────────┐
-                                │ Hook redaction   │
-                                └──────────────────┘
+┌─────────────┐     set/remove     ┌──────────────────┐
+│ Human + CLI │ ─────────────────► │ secrets.json     │
+└─────────────┘                    │ (plain, 0600)    │
+                                   └────────┬─────────┘
+┌─────────────┐     inject_secret           │
+│ Agent + MCP │ ◄───────────────────────────┘
+└─────────────┘     → inject/*.env (short-lived)
 ```
 
-### Non-goals / known risks
+### Legacy encrypted vault
 
-- Unlocked session file theft = secret compromise (lock when idle)
-- Encryption at rest does not protect an unlocked machine
-- `resolve_secret` can put plaintext in MCP tool results — prefer `inject_secret`
-- Hook only redacts **known** values
-- No multi-user authz, remote attestation, hardware-backed keys, or backup/recovery kit in MVP
-- Not a substitute for OS keychain / enterprise secret managers when those are required
+Older releases stored ciphertext in `vault.db`. That file is **never wiped or auto-migrated**. Users re-add secrets via Terminal `set` into `secrets.json`.
 
-## Reporting vulnerabilities
+### Reporting
 
-Please open a [GitHub security advisory](https://github.com/vishnutvm/password-space/security/advisories/new) (preferred) or email the maintainer via the address on the GitHub profile. Do not file public issues with working exploit details for crypto/session bugs until a fix is available.
+Please report security issues privately to the repository owner. Do not open public issues that include real secrets or exploit details that would harm other users.
