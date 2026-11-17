@@ -97,13 +97,15 @@ function decodeMacValue(stored) {
   }
   return stored;
 }
+var MAC_MAX_LINE = 4e3;
+var MAC_MAX_VALUE_BYTES = 1900;
 var MacKeychain = class {
   run;
   keychainPath;
   bin;
   kind = "macos-keychain";
   description;
-  constructor(run = defaultRunner, keychainPath = process.env.PASSWORD_SPACE_MACOS_KEYCHAIN?.trim() || void 0, bin = "/usr/bin/security") {
+  constructor(run = defaultRunner, keychainPath = process.env.PASSWORD_SPACE_MACOS_KEYCHAIN?.trim() || null, bin = "/usr/bin/security") {
     this.run = run;
     this.keychainPath = keychainPath;
     this.bin = bin;
@@ -138,6 +140,9 @@ var MacKeychain = class {
     }
     const line = `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${account} -l ${safeLabel(label)} -X ${hex}${kc}
 `;
+    if (line.length > MAC_MAX_LINE) {
+      throw new VaultError(`Secret is too long for the macOS Keychain helper (${Buffer.byteLength(value)} bytes, about ${MAC_MAX_VALUE_BYTES} allowed). Use PASSWORD_SPACE_STORAGE=file for very long values.`, "INVALID");
+    }
     const r = this.run(this.bin, ["-i"], line);
     if (r.status !== 0 || r.stderr.trim())
       fail("write", this.description, r);

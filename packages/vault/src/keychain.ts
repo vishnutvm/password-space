@@ -90,6 +90,10 @@ export function decodeMacValue(stored: string): string {
   return stored;
 }
 
+/** `security -i` line buffer is 4096 bytes; stay under it. */
+const MAC_MAX_LINE = 4000;
+export const MAC_MAX_VALUE_BYTES = 1900;
+
 export class MacKeychain implements Keychain {
   readonly kind = "macos-keychain" as const;
   readonly description: string;
@@ -97,8 +101,8 @@ export class MacKeychain implements Keychain {
   constructor(
     private readonly run: Runner = defaultRunner,
     /** Optional keychain file (tests / CI). Default: the user's login keychain. */
-    private readonly keychainPath: string | undefined = process.env.PASSWORD_SPACE_MACOS_KEYCHAIN?.trim() ||
-      undefined,
+    /** `null` forces the login keychain even when the env var is set. */
+    private readonly keychainPath: string | null = process.env.PASSWORD_SPACE_MACOS_KEYCHAIN?.trim() || null,
     private readonly bin = "/usr/bin/security",
   ) {
     this.description = keychainPath ? `macOS Keychain (${keychainPath})` : "macOS Keychain";
@@ -134,6 +138,15 @@ export class MacKeychain implements Keychain {
       throw new VaultError("PASSWORD_SPACE_MACOS_KEYCHAIN must not contain spaces", "INVALID");
     }
     const line = `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${account} -l ${safeLabel(label)} -X ${hex}${kc}\n`;
+    // `security -i` reads 4 KB lines and runs the rest as a new command, so
+    // refuse rather than store a truncated value. That allows ~1.9 KB values.
+    if (line.length > MAC_MAX_LINE) {
+      throw new VaultError(
+        `Secret is too long for the macOS Keychain helper (${Buffer.byteLength(value)} bytes, about ${MAC_MAX_VALUE_BYTES} allowed). ` +
+          "Use PASSWORD_SPACE_STORAGE=file for very long values.",
+        "INVALID",
+      );
+    }
     const r = this.run(this.bin, ["-i"], line);
     // `security -i` can exit 0 after a failed command; it reports on stderr.
     if (r.status !== 0 || r.stderr.trim()) fail("write", this.description, r);

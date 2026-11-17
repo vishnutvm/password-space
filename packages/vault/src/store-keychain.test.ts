@@ -249,7 +249,7 @@ describe("prompt guard", () => {
 });
 
 describe.runIf(process.env.PASSWORD_SPACE_KEYCHAIN_IT === "1")("real OS keychain store", () => {
-  it("set → guard → migrate to file → back to keychain → delete", async () => {
+  it("set → guard → migrate to file → back to keychain → delete", { timeout: 180_000 }, async () => {
     const { MacKeychain, WindowsCredentialManager, LinuxSecretService } = await import("./keychain.js");
     const kc: Keychain =
       process.platform === "darwin"

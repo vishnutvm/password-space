@@ -185,7 +185,8 @@ Also see [`examples/mcp.cursor.json`](./examples/mcp.cursor.json). Skill: `plugi
 | Linux | Secret Service (GNOME Keyring, KWallet, ...) | `secret-tool` from `libsecret-tools` |
 
 Values are always passed to these tools on stdin, never on the command line. Windows limits one
-credential to 2,560 bytes; longer values are refused with a clear error.
+credential to 2,560 bytes and the macOS helper to about 1,900 bytes; longer values (such as
+large PEM keys) are refused with a clear error. Use `PASSWORD_SPACE_STORAGE=file` for those.
 `setup` picks the backend once, when it creates the store:
 
 - `PASSWORD_SPACE_STORAGE=auto` (default): use the keychain if a test write works, else fall back to plain `secrets.json` and show why.
