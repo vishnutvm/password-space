@@ -28,7 +28,7 @@ const SECRET = "s3cret value with 'quotes' \"and\" $dollars";
 describe("macOS backend", () => {
   it("never puts the value on the command line", () => {
     const { run, calls } = fakeRunner(() => ({}));
-    new MacKeychain(run, undefined).set("store:id-1", SECRET, "password-space:API KEY");
+    new MacKeychain(run, null).set("store:id-1", SECRET, "password-space:API KEY");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args).toEqual(["-i"]);
     expect(calls[0]!.args.join(" ")).not.toContain("s3cret");
@@ -41,7 +41,7 @@ describe("macOS backend", () => {
   it("maps exit 44 to a missing item and strips one trailing newline", () => {
     let status = 44;
     const { run } = fakeRunner(() => ({ status, stdout: "abc\n\n" }));
-    const kc = new MacKeychain(run, undefined);
+    const kc = new MacKeychain(run, null);
     expect(kc.get("a")).toBeNull();
     status = 0;
     expect(kc.get("a")).toBe("abc\n");
@@ -66,9 +66,17 @@ describe("macOS backend", () => {
     expect(calls[2]!.args.at(-1)).toBe("/tmp/ci.keychain-db");
   });
 
+  it("refuses values too long for one security -i line", () => {
+    const { run, calls } = fakeRunner(() => ({}));
+    const kc = new MacKeychain(run, null);
+    kc.set("a", "x".repeat(1800), "l");
+    expect(() => kc.set("a", "x".repeat(2100), "l")).toThrow(/too long/);
+    expect(calls).toHaveLength(1);
+  });
+
   it("treats errors printed by security -i as failures", () => {
     const { run } = fakeRunner(() => ({ stderr: "security: SecKeychainItemCreateFromContent: User interaction is not allowed." }));
-    expect(() => new MacKeychain(run, undefined).set("a", "v", "l")).toThrow(/write failed/);
+    expect(() => new MacKeychain(run, null).set("a", "v", "l")).toThrow(/write failed/);
   });
 });
 
@@ -146,10 +154,11 @@ describe.runIf(process.env.PASSWORD_SPACE_KEYCHAIN_IT === "1")("real OS keychain
     return new LinuxSecretService();
   }
 
-  it("round-trips tricky values and deletes them", () => {
+  // Windows: every call starts PowerShell and compiles the helper (~1-2 s).
+  it("round-trips tricky values and deletes them", { timeout: 180_000 }, () => {
     const kc = real();
     const account = `it-${process.pid}-${Date.now()}`;
-    for (const v of [SECRET, "line1\nline2\n", "ünïcødé ✓", "x".repeat(2000), "b64:not-really"]) {
+    for (const v of [SECRET, "line1\nline2\n", "ünïcødé ✓", "x".repeat(1500), "b64:not-really"]) {
       kc.set(account, v, "password-space:it");
       expect(kc.get(account)).toBe(v);
     }
