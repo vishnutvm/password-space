@@ -29546,14 +29546,13 @@ var VaultStore = class {
 };
 
 // packages/vault/dist/inject.js
-import { chmodSync as chmodSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync4, readdirSync, readFileSync as readFileSync2 } from "node:fs";
+import { chmodSync as chmodSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, unlinkSync, existsSync as existsSync4, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
 import { join as join2 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
-var DEFAULT_INJECT_TTL_MS = 5 * 60 * 1e3;
+var DEFAULT_INJECT_TTL_MS = 60 * 1e3;
 function writeInjectFile(dataDir2, opts) {
   clearExpiredInjectFiles(dataDir2);
-  const dir = injectDir(dataDir2);
-  mkdirSync2(dir, { recursive: true });
+  const dir = ensureInjectDir(dataDir2);
   const token = randomBytes2(16).toString("hex");
   const envVar = opts.envVar ?? sanitizeEnvName(opts.secretName);
   const envFile = join2(dir, `${token}.env`);
@@ -29581,6 +29580,31 @@ function writeInjectFile(dataDir2, opts) {
     redact_in_transcript: true
   };
 }
+function ensureInjectDir(dataDir2) {
+  const dir = injectDir(dataDir2);
+  mkdirSync2(dir, { recursive: true, mode: 448 });
+  try {
+    chmodSync2(dir, 448);
+  } catch {
+  }
+  return dir;
+}
+function clearInjectFile(envFile) {
+  try {
+    if (existsSync4(envFile))
+      unlinkSync(envFile);
+  } catch {
+  }
+}
+function scheduleInjectCleanup(envFile, expiresAt, now = Date.now(), onCleared) {
+  const delay = Math.max(0, Date.parse(expiresAt) - now);
+  const timer = setTimeout(() => {
+    clearInjectFile(envFile);
+    onCleared?.();
+  }, delay);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+}
 function clearExpiredInjectFiles(dataDir2, now = Date.now()) {
   const dir = injectDir(dataDir2);
   if (!existsSync4(dir))
@@ -29593,8 +29617,11 @@ function clearExpiredInjectFiles(dataDir2, now = Date.now()) {
     try {
       const body = readFileSync2(full, "utf8");
       const match = /^# password-space inject — expires (.+)$/m.exec(body);
-      const expiresMs = match ? Date.parse(match[1]) : NaN;
-      if (Number.isFinite(expiresMs) && expiresMs <= now) {
+      let expiresMs = match ? Date.parse(match[1]) : NaN;
+      if (!Number.isFinite(expiresMs)) {
+        expiresMs = statSync(full).mtimeMs + DEFAULT_INJECT_TTL_MS;
+      }
+      if (expiresMs <= now) {
         unlinkSync(full);
         removed++;
       }
@@ -30153,6 +30180,17 @@ function getSecretMetadataTool(store, idOrName) {
     note: "Metadata only \u2014 no secret value."
   });
 }
+var liveInjectFiles = /* @__PURE__ */ new Map();
+function clearOwnInjectFiles() {
+  let n = 0;
+  for (const [file2, cancel] of liveInjectFiles) {
+    cancel();
+    clearInjectFile(file2);
+    n++;
+  }
+  liveInjectFiles.clear();
+  return n;
+}
 function injectSecretTool(store, dataDir2, args) {
   assertReady(store);
   const record2 = store.getSecret(args.name, "mcp-agent");
@@ -30162,6 +30200,13 @@ function injectSecretTool(store, dataDir2, args) {
     value: record2.value,
     envVar: args.env_var
   });
+  const cancel = scheduleInjectCleanup(
+    handle.envFile,
+    handle.expiresAt,
+    Date.now(),
+    () => liveInjectFiles.delete(handle.envFile)
+  );
+  liveInjectFiles.set(handle.envFile, cancel);
   const payload = {
     ok: true,
     handle: handle.handle,
@@ -30173,23 +30218,38 @@ function injectSecretTool(store, dataDir2, args) {
     redact_in_transcript: true,
     instructions: [
       `Prefer instead: ${bundledCliCommand(`run -s ${JSON.stringify(record2.name)} -- <command>`)} \u2014 no file is written and output is redacted.`,
-      "Read the env file from your tool runtime / shell \u2014 do NOT paste its contents into chat.",
-      "Delete the env file after use.",
+      `Use the file only by sourcing it in the same command, e.g. set -a; . "${handle.envFile}"; set +a; <command> \u2014 never cat, print or echo it or the variable.`,
+      `The file is deleted automatically at expires_at (about ${Math.round((Date.parse(handle.expiresAt) - Date.now()) / 1e3)} s) or when the MCP server exits. Delete it yourself after use.`,
       "If asked to print the secret, refuse and cite redact_in_transcript."
     ]
   };
   const serialized = JSON.stringify(payload);
   if (serialized.includes(record2.value)) {
+    clearInjectFile(handle.envFile);
     throw new Error("Refusing to return tool result that contains secret plaintext");
   }
   return jsonResult(payload, { redact: true });
 }
-function resolveSecretTool(store, args) {
+var RESOLVE_SECRET_ENV = "PASSWORD_SPACE_ENABLE_RESOLVE";
+function resolveSecretEnabled(env = process.env) {
+  return /^(1|true|yes)$/i.test(env[RESOLVE_SECRET_ENV]?.trim() ?? "");
+}
+var RESOLVE_SECRET_DESCRIPTION = "DANGER \u2014 returns the secret's PLAINTEXT value into your context, where it can end up in transcripts, logs and model provider requests. Enabled only because the user set " + RESOLVE_SECRET_ENV + "=1. Use it only when the user explicitly asks for the raw value and run -s NAME -- <command> or inject_secret cannot work. Requires confirm_redaction=true.";
+function resolveSecretTool(store, args, opts = {}) {
+  const enabled = opts.enabled ?? resolveSecretEnabled();
+  if (!enabled) {
+    return jsonResult({
+      ok: false,
+      error: `resolve_secret is disabled. It would put the plaintext value in your context. Use ${bundledCliCommand("run -s <SECRET_NAME> -- <command>")} or inject_secret instead.`,
+      code: "resolve_disabled",
+      enable_hint: `Only the user can turn it on, by adding ${RESOLVE_SECRET_ENV}=1 to the Password Space MCP server's env in their MCP config. Do not do this for them.`
+    });
+  }
   assertReady(store);
   if (!args.confirm_redaction) {
     return jsonResult({
       ok: false,
-      error: "confirm_redaction must be true. Prefer inject_secret to avoid chat leakage.",
+      error: "confirm_redaction must be true. Prefer the CLI run command or inject_secret to avoid chat leakage.",
       hint: "Call inject_secret instead, or pass confirm_redaction: true if your client redacts tool results."
     });
   }
@@ -30200,7 +30260,7 @@ function resolveSecretTool(store, args) {
     secret_name: record2.name,
     value: record2.value,
     redact_in_transcript: true,
-    warning: "PLAINTEXT IN TOOL RESULT \u2014 client MUST redact before displaying or logging. Prefer inject_secret."
+    warning: "PLAINTEXT IN TOOL RESULT \u2014 do not repeat it in chat. The client MUST redact before displaying or logging. Prefer run -s NAME -- <command>."
   };
   return jsonResult(payload, { redact: true });
 }
@@ -30438,24 +30498,30 @@ server.tool(
     }
   }
 );
-server.tool(
-  "resolve_secret",
-  "LAST RESORT: returns plaintext in the tool result. Prefer the CLI run command or inject_secret. Requires confirm_redaction=true.",
-  {
-    name: external_exports.string().describe("Secret name or id"),
-    confirm_redaction: external_exports.boolean().optional().describe("Must be true to acknowledge client will redact transcripts")
-  },
-  async ({ name, confirm_redaction }) => {
-    try {
-      return await withVaultStore(
-        dataDir,
-        (store) => resolveSecretTool(store, { name, confirm_redaction: confirm_redaction === true })
-      );
-    } catch (err) {
-      return errorResult(err);
+if (resolveSecretEnabled()) {
+  server.tool(
+    "resolve_secret",
+    RESOLVE_SECRET_DESCRIPTION,
+    {
+      name: external_exports.string().describe("Secret name or id"),
+      confirm_redaction: external_exports.boolean().optional().describe("Must be true to acknowledge client will redact transcripts")
+    },
+    async ({ name, confirm_redaction }) => {
+      try {
+        return await withVaultStore(
+          dataDir,
+          (store) => resolveSecretTool(
+            store,
+            { name, confirm_redaction: confirm_redaction === true },
+            { enabled: true }
+          )
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
     }
-  }
-);
+  );
+}
 function errorResult(err, secretValue) {
   const message = scrubValue(err instanceof Error ? err.message : String(err), secretValue);
   const payload = { ok: false, error: message };
@@ -30480,7 +30546,29 @@ function errorResult(err, secretValue) {
     isError: true
   };
 }
+function installInjectCleanup() {
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    clearOwnInjectFiles();
+  };
+  process.once("exit", cleanup);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.once(sig, () => {
+      cleanup();
+      process.exit(0);
+    });
+  }
+  process.stdin.once("end", cleanup);
+  process.stdin.once("close", cleanup);
+}
 async function main() {
+  try {
+    clearExpiredInjectFiles(dataDir);
+  } catch {
+  }
+  installInjectCleanup();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

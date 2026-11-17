@@ -48,7 +48,7 @@ node "<plugin>/dist/cli.js" run -s GITHUB_TOKEN -- gh repo list
 node "<plugin>/dist/cli.js" run -s OPENAI_API_KEY=openai-prod -- npm test
 ```
 
-`vault_status` returns the exact `run_command` with the right path. Output is redacted for you. Never `cat ~/.password-space/*`, never `get`, never echo the variable. Use `inject_secret` only when a command cannot be wrapped with `run`. A prompt that contains a stored value is blocked by the plugin hook.
+`vault_status` returns the exact `run_command` with the right path. Output is redacted for you. Never `cat ~/.password-space/*`, never `get`, never echo the variable. Use `inject_secret` only when a command cannot be wrapped with `run`, and then only source the file in the same command (`set -a; . FILE; set +a; <command>`). It is deleted after 60 seconds. A prompt that contains a stored value is blocked by the plugin hook, and the tool hook blocks `get`, direct keychain lookups (`security`, `secret-tool`) and reads of `secrets.json` or inject files. Do not try to work around a block: use the secret by name. `resolve_secret` is off unless the user turned it on; never ask them to.
 
 ### Never do this
 

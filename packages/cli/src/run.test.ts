@@ -125,9 +125,32 @@ describe("password-space run (end to end)", () => {
     expect(r.status).toBe(0);
   });
 
-  it("--no-redact passes output through untouched", () => {
+  it("--no-redact is refused when output is piped (agents, scripts)", () => {
     const r = run(["--no-redact", "-s", "api token", ...printEnv("API_TOKEN")]);
-    expect(r.stdout).toBe(VALUE);
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toContain(VALUE);
+    expect(r.stderr).toMatch(/--no-redact only works .* interactive terminal/);
+  });
+
+  it("get refuses to print a value without an interactive terminal", () => {
+    for (const extra of [[], ["--json"]]) {
+      const r = spawnSync(process.execPath, [cli, "get", "api token", ...extra], {
+        encoding: "utf8",
+        env: { ...process.env, PASSWORD_SPACE_HOME: join(dir, "home") },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stdout + r.stderr).not.toContain(VALUE);
+      expect(r.stderr).toMatch(/interactive terminal/);
+      expect(r.stderr).toMatch(/run -s "api token" -- <command>/);
+    }
+    // Piping a "y" into stdin does not help either.
+    const piped = spawnSync(process.execPath, [cli, "get", "api token"], {
+      encoding: "utf8",
+      input: "y\n",
+      env: { ...process.env, PASSWORD_SPACE_HOME: join(dir, "home") },
+    });
+    expect(piped.status).toBe(1);
+    expect(piped.stdout).not.toContain(VALUE);
   });
 
   it("propagates the child's exit code", () => {

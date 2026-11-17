@@ -5,7 +5,8 @@
  * Bundled for marketplace installs (`plugins/password-space/dist/index.js`).
  * End users name secrets via Terminal CLI bundled at `dist/cli.js`
  * (sibling of this file) — no monorepo clone required.
- * Prefer inject_secret over resolve_secret.
+ * Agents use secrets by name (CLI run / inject_secret). resolve_secret, which
+ * returns plaintext, is only registered when PASSWORD_SPACE_ENABLE_RESOLVE=1.
  *
  * Never log secret values.
  */
@@ -20,14 +21,17 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
-import { defaultDataDir } from "@password-space/vault";
+import { clearExpiredInjectFiles, defaultDataDir } from "@password-space/vault";
 import {
   CLI_SETUP_COMMANDS,
   bundledCliCommand,
   NodeVersionError,
+  RESOLVE_SECRET_DESCRIPTION,
+  clearOwnInjectFiles,
   getSecretMetadataTool,
   injectSecretTool,
   listSecretsTool,
+  resolveSecretEnabled,
   removeSecretTool,
   resolveSecretTool,
   scrubValue,
@@ -297,26 +301,35 @@ server.tool(
   },
 );
 
-server.tool(
-  "resolve_secret",
-  "LAST RESORT: returns plaintext in the tool result. Prefer the CLI run command or inject_secret. Requires confirm_redaction=true.",
-  {
-    name: z.string().describe("Secret name or id"),
-    confirm_redaction: z
-      .boolean()
-      .optional()
-      .describe("Must be true to acknowledge client will redact transcripts"),
-  },
-  async ({ name, confirm_redaction }) => {
-    try {
-      return await withVaultStore(dataDir, (store) =>
-        resolveSecretTool(store, { name, confirm_redaction: confirm_redaction === true }),
-      );
-    } catch (err) {
-      return errorResult(err);
-    }
-  },
-);
+// resolve_secret puts plaintext into the agent's context, so it is opt-in: the
+// tool is not even listed unless the user set PASSWORD_SPACE_ENABLE_RESOLVE=1
+// in this server's env.
+if (resolveSecretEnabled()) {
+  server.tool(
+    "resolve_secret",
+    RESOLVE_SECRET_DESCRIPTION,
+    {
+      name: z.string().describe("Secret name or id"),
+      confirm_redaction: z
+        .boolean()
+        .optional()
+        .describe("Must be true to acknowledge client will redact transcripts"),
+    },
+    async ({ name, confirm_redaction }) => {
+      try {
+        return await withVaultStore(dataDir, (store) =>
+          resolveSecretTool(
+            store,
+            { name, confirm_redaction: confirm_redaction === true },
+            { enabled: true },
+          ),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+}
 
 function errorResult(err: unknown, secretValue?: string) {
   // Never let an error message carry a value an agent just tried to store.
@@ -347,7 +360,33 @@ function errorResult(err: unknown, secretValue?: string) {
   };
 }
 
+/** Remove inject files this server wrote, so plaintext does not outlive it. */
+function installInjectCleanup(): void {
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    clearOwnInjectFiles();
+  };
+  process.once("exit", cleanup);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.once(sig, () => {
+      cleanup();
+      process.exit(0);
+    });
+  }
+  // stdio hosts usually close stdin rather than signal the server.
+  process.stdin.once("end", cleanup);
+  process.stdin.once("close", cleanup);
+}
+
 async function main(): Promise<void> {
+  try {
+    clearExpiredInjectFiles(dataDir);
+  } catch {
+    // best effort: a missing or unreadable inject dir is not fatal
+  }
+  installInjectCleanup();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
