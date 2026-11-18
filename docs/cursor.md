@@ -35,6 +35,9 @@ server's environment.
    as `cli.js run -s NAME -- <command>`, so the value goes into that command's
    environment and never into the chat.
 
+To test the whole flow in a real Cursor app, follow
+[Check the plugin in Cursor](cursor-check.md).
+
 ## Hooks
 
 | Hook | Script | What it does |
