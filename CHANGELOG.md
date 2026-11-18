@@ -12,6 +12,29 @@ bundled MCP server and the `password-space` CLI on npm. See
 
 ## [Unreleased]
 
+### Changed
+
+- Setup is done by the agent. `/password-space:setup-password-space` (Claude
+  Code) and `/setup-password-space` (Cursor) now call the new `setup_vault` MCP
+  tool, which creates the store in the OS keychain and moves old plain-text
+  values into it. The user no longer pastes a Terminal command. If the MCP
+  server cannot start, the command checks `node -v`, explains how to install
+  Node.js 20+, or runs the bundled `cli.js setup --yes` itself.
+- `vault_onboard` / `vault_status` now return `primary_action.id` of
+  `setup_vault` or `ready` (was `cli_setup` / `cli_set`), and
+  `terminal_fallback` instead of `copy_paste_command`.
+- `list_secrets` before setup returns an empty list pointing at `setup_vault`
+  instead of an error.
+- `password-space setup --yes` now answers yes to moving plain-text values into
+  the keychain (it used to skip the move).
+
+### Fixed
+
+- The skill and setup command now trigger on phrases like "set up password
+  space", "save this token" and "remove this token".
+- The plugin-path lookup now matches Claude Code's versioned install folder
+  (`…/password-space/<version>/dist/cli.js`); the old `find` pattern missed it.
+
 ### Removed
 
 - Unused code left from the encrypted vault, the duplicate root `skills/` and

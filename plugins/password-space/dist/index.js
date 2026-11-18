@@ -38389,7 +38389,7 @@ function bundledCliCommand(subcommand = "") {
   const sub = subcommand.trim();
   return sub ? `${base} ${sub}` : base;
 }
-var TRUST_LINE = "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Name them in Terminal, or hand one to your agent once and it saves it with store_secret; after that it is used by name and never shown again.";
+var TRUST_LINE = "Secret values live in this device's OS keychain (or a local 0600 file when there is no keychain). Hand one to your agent once and it saves it with store_secret (or name it yourself in Terminal); after that it is used by name and never shown again.";
 function storageFields(store) {
   const info = store.storageInfo();
   return {
@@ -38397,7 +38397,7 @@ function storageFields(store) {
     values: info,
     ...info.migration_available ? {
       migrate_command: bundledCliCommand("migrate"),
-      migrate_note: "Values are in plain text in secrets.json and this machine has an OS keychain. Suggest the user run migrate_command in Terminal."
+      migrate_note: "Values are in plain text in secrets.json and this machine has an OS keychain. Call setup_vault to move them into the keychain (no Terminal needed)."
     } : {},
     run_command: bundledCliCommand("run -s <SECRET_NAME> -- <command>"),
     run_note: "Preferred way for agents to use a secret: run the command through the CLI so the value goes straight into the child process env and is redacted from its output."
@@ -38414,7 +38414,7 @@ function checkPrerequisites(nodeVersion = process.version) {
     node_major: nodeMajor,
     node_ok: nodeOk,
     required_node: `>=${MIN_NODE_MAJOR}`,
-    howToFix: nodeOk ? void 0 : `Install Node.js ${MIN_NODE_MAJOR} or newer from https://nodejs.org, then reload Cursor (MCP runs on the host Node).`
+    howToFix: nodeOk ? void 0 : `Install Node.js ${MIN_NODE_MAJOR} or newer from https://nodejs.org (macOS: the .pkg installer, or \`brew install node\`), then restart Claude Code or reload Cursor (the MCP server runs on that Node).`
   };
 }
 function onboardingProgress(initialized) {
@@ -38441,23 +38441,24 @@ function buildPrimaryAction(initialized, prereqOk = true) {
     return {
       id: "fix_node",
       title: "Upgrade Node.js",
-      do_this: `Install Node.js ${MIN_NODE_MAJOR}+, then reload Cursor so the Password Space MCP can start.`,
+      do_this: `Tell the user to install Node.js ${MIN_NODE_MAJOR}+ (https://nodejs.org, or \`brew install node\` on a Mac), then restart Claude Code / reload Cursor so the Password Space MCP can start.`,
       never: "Do not edit mcp.json. Do not paste secrets into chat."
     };
   }
   if (!initialized) {
     return {
-      id: "cli_setup",
-      title: "Create your local store in Terminal",
-      do_this: "Open Terminal and run the copy_paste_command below (no passphrase). Then run set to name a secret at the hidden prompt. Never paste values in chat.",
-      recommended_path: "cli_setup",
-      copy_paste_command: bundledCliCommand("setup"),
-      never: "Never paste secret values into chat. Never ask the user to edit mcp.json. Do not use App forms for add/remove.",
+      id: "setup_vault",
+      title: "Create the local store (the agent does it)",
+      do_this: "Call the setup_vault tool now. It creates ~/.password-space and uses the OS keychain when there is one. The user types nothing and runs nothing in Terminal.",
+      mcp_tool: "setup_vault",
+      recommended_path: "setup_vault",
+      terminal_fallback: bundledCliCommand("setup --yes"),
+      never: "Never ask the user to paste a Terminal command for setup. Never ask the user to edit mcp.json. Never echo secret values.",
       alternatives: [
         {
           id: "list_secrets",
-          title: "Check status via MCP",
-          do_this: "After Terminal setup + set, call vault_status or list_secrets."
+          title: "Check status",
+          do_this: "After setup_vault, call vault_status or list_secrets."
         }
       ],
       advanced_escape_hatch: {
@@ -38468,27 +38469,27 @@ function buildPrimaryAction(initialized, prereqOk = true) {
     };
   }
   return {
-    id: "cli_set",
-    title: "Add a named secret in Terminal",
-    do_this: "Open Terminal and run the copy_paste_command (or bare cli.js for the interactive menu). Type the secret name, then the value at the hidden prompt. Ask the agent to use it by name via inject_secret.",
-    recommended_path: "cli_set",
-    copy_paste_command: bundledCliCommand("set"),
-    never: "Never paste API keys or passwords into chat.",
+    id: "ready",
+    title: "Ready: save, use and remove secrets by name",
+    do_this: 'Setup is done. Tell the user they can now say things like "save this token as GITHUB_TOKEN: <token>" or "remove GITHUB_TOKEN". Save with store_secret, use with run_command, remove with remove_secret. Check list_secrets before asking for any key.',
+    recommended_path: "ready",
+    terminal_fallback: bundledCliCommand("set"),
+    never: "Never repeat a secret value in chat. Never ask for a key that list_secrets already has.",
     alternatives: [
-      {
-        id: "list_secrets",
-        title: "List via MCP",
-        do_this: "After Terminal add, call list_secrets or vault_status (no values)."
-      },
       {
         id: "store_secret",
         title: "Agent saves a key the user hands over",
-        do_this: "If the user gives you a credential, call store_secret with a descriptive name, then use it by name with run. Never repeat the value."
+        do_this: "When the user gives you a credential, call store_secret with a descriptive name, then use it by name with run. Never repeat the value."
       },
       {
-        id: "cli_menu",
-        title: "Interactive Terminal menu",
-        do_this: `Run ${bundledCliCommand("")} (no subcommand) for setup / add / remove / list / status.`
+        id: "remove_secret",
+        title: "Agent removes a key",
+        do_this: "When the user asks to remove or forget a key, call remove_secret with its name."
+      },
+      {
+        id: "terminal_set",
+        title: "Optional: type the value in Terminal instead of chat",
+        do_this: `Only if the user does not want the value in the chat history: they can run ${bundledCliCommand("set")} and type it at a hidden prompt.`
       }
     ],
     advanced_escape_hatch: {
@@ -38506,23 +38507,23 @@ function buildOnboardingSteps(initialized) {
       title: "Welcome",
       done: true,
       tool: "vault_onboard",
-      user_action: "You're in the right place. Follow primary_action \u2014 Terminal for setup/add/remove (plugin-bundled CLI; no clone)."
+      user_action: "You're in the right place. The agent does the setup; nothing to paste in Terminal."
     },
     {
       id: "init",
       phase: "1/2",
-      title: "Ensure local store",
+      title: "Create the local store",
       done: initialized,
-      tool: "cli_setup",
-      user_action: initialized ? void 0 : `Run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` \u2014 creates ~/.password-space (values go to the OS keychain). No passphrase.`
+      tool: "setup_vault",
+      user_action: initialized ? void 0 : "The agent calls setup_vault \u2014 creates ~/.password-space (values go to the OS keychain). No passphrase."
     },
     {
       id: "store",
       phase: "2/2",
-      title: "Name a secret",
+      title: "Save a secret",
       done: false,
-      tool: "cli_set",
-      user_action: `In Terminal run \`${CLI_SETUP_COMMANDS.plugin_set}\` \u2014 type name, then hidden value. Never in chat.`
+      tool: "store_secret",
+      user_action: 'Tell the agent "save this token as GITHUB_TOKEN" and give it the token once.'
     },
     {
       id: "use",
@@ -38539,34 +38540,67 @@ function recoveryGuidance(opts) {
     case "fix_node":
       return {
         code: "node_too_old",
-        howToFix: `Install Node.js ${MIN_NODE_MAJOR}+ from https://nodejs.org, then reload Cursor.`,
+        howToFix: `Install Node.js ${MIN_NODE_MAJOR}+ from https://nodejs.org (or \`brew install node\` on a Mac), then restart Claude Code / reload Cursor.`,
         what_to_do: [
           `Confirm \`node -v\` shows v${MIN_NODE_MAJOR} or newer.`,
-          "Reload the Cursor window so MCP restarts on the new Node.",
-          "Run /setup-password-space again."
+          "Restart Claude Code (or reload the Cursor window) so the MCP server restarts on the new Node.",
+          "Run /password-space:setup-password-space again."
         ]
       };
     case "needs_init":
       return {
         code: opts.legacyEncrypted ? "legacy_encrypted_vault" : "store_missing",
-        howToFix: opts.legacyEncrypted ? `Legacy encrypted vault.db detected (left untouched). Create the new store with \`${CLI_SETUP_COMMANDS.plugin_setup}\`, then re-add secrets with set.` : `Create the local store in Terminal with \`${CLI_SETUP_COMMANDS.plugin_setup}\` \u2014 no passphrase, no unlock.`,
+        howToFix: opts.legacyEncrypted ? "Legacy encrypted vault.db detected (left untouched). Call setup_vault to create the new store, then save secrets again with store_secret." : "Call setup_vault to create the local store \u2014 no passphrase, no unlock, nothing for the user to run.",
         what_to_do: [
-          `Run: ${bundledCliCommand("setup")}`,
-          `Then: ${bundledCliCommand("set")}`,
-          "Do not use App forms for add \u2014 Terminal CLI only.",
-          ...opts.legacyEncrypted ? ["Old vault.db is not auto-migrated \u2014 re-add secrets by name in Terminal."] : []
+          "Call setup_vault.",
+          "Then save secrets the user hands over with store_secret.",
+          ...opts.legacyEncrypted ? ["Old vault.db is not auto-migrated \u2014 re-add secrets by name."] : []
         ]
       };
     default:
       return {
         code: "ready",
-        howToFix: `Store is ready. Add a credential in Terminal with \`${CLI_SETUP_COMMANDS.plugin_set}\`.`,
+        howToFix: "Store is ready. Save a credential with store_secret when the user hands one over.",
         what_to_do: [
-          `Run: ${bundledCliCommand("set")}`,
-          "Then list_secrets via MCP, and `run -s NAME -- <command>` to use a secret (no values in chat)."
+          "list_secrets before asking for any key; `run -s NAME -- <command>` to use one (no values in chat).",
+          "store_secret to save, remove_secret to delete."
         ]
       };
   }
+}
+function setupVaultTool(store, dataDir2) {
+  const prereq = checkPrerequisites();
+  const wasInitialized = store.isInitialized();
+  store.ensure();
+  let migrated = null;
+  let migrate_error;
+  if (store.storageInfo().migration_available) {
+    try {
+      migrated = store.migrate("keychain").moved;
+    } catch (err) {
+      migrate_error = err instanceof Error ? err.message : String(err);
+    }
+  }
+  const info = store.storageInfo();
+  const count = store.listSecrets().length;
+  const where = info.backend === "keychain" ? `your OS keychain (${info.keychain})` : "a private file in ~/.password-space (no OS keychain available on this machine)";
+  return jsonResult({
+    ok: true,
+    action: wasInitialized ? "already_set_up" : "created",
+    data_dir: dataDir2,
+    store_path: secretsStorePath(dataDir2),
+    secret_count: count,
+    ...migrated !== null ? { moved_to_keychain: migrated } : {},
+    ...migrate_error ? { migrate_error } : {},
+    prerequisites: prereq,
+    ...storageFields(store),
+    legacy_encrypted_vault: hasLegacyEncryptedVault(dataDir2),
+    tell_user: `Password Space is ready${wasInitialized ? " (it was already set up)" : ""}. Secret values are kept in ${where}. From now on just tell me things like "save this token as GITHUB_TOKEN", "use GITHUB_TOKEN to list my repos" or "remove GITHUB_TOKEN". Any later session finds saved secrets by name.`,
+    next: [
+      "Tell the user tell_user in plain words. Do not show JSON or file paths unless asked.",
+      "When the user hands you a credential, call store_secret. Before asking for one, call list_secrets."
+    ]
+  });
 }
 function vaultOnboardTool(store, dataDir2) {
   const prereq = checkPrerequisites();
@@ -38588,7 +38622,7 @@ function vaultOnboardTool(store, dataDir2) {
     legacyEncrypted
   });
   const progress = onboardingProgress(initialized);
-  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? legacyEncrypted ? "Welcome. A legacy encrypted vault.db was found (untouched). Create the new store in Terminal, then re-add secrets." : "Welcome to Password Space. Next: open Terminal and run setup, then set \u2014 no passphrase or unlock." : "Store ready. Add named secrets in Terminal; agents use them by name via the CLI run command.";
+  const human_summary = !prereq.ok ? `Password Space needs Node.js ${MIN_NODE_MAJOR}+. Found ${prereq.node_version}.` : !initialized ? legacyEncrypted ? "Welcome. A legacy encrypted vault.db was found (untouched). The agent calls setup_vault to create the new store; then re-add secrets." : "Welcome to Password Space. Next: the agent calls setup_vault \u2014 nothing to type in Terminal, no passphrase." : "Store ready. Hand a key to the agent once (it saves it with store_secret); it is used by name after that.";
   return jsonResult({
     ok: prereq.ok,
     setup_state,
@@ -38611,8 +38645,7 @@ function vaultOnboardTool(store, dataDir2) {
     human_summary,
     primary_action,
     recommended_path: primary_action.recommended_path ?? null,
-    copy_paste_command: primary_action.copy_paste_command,
-    next_tool: ready ? "list_secrets" : "vault_status",
+    next_tool: ready ? "list_secrets" : prereq.ok ? "setup_vault" : null,
     recovery,
     what_to_do: [primary_action.do_this],
     never_paste_in_chat: ["secret values"],
@@ -38623,7 +38656,7 @@ function vaultOnboardTool(store, dataDir2) {
       "Use App forms for add/remove",
       "Require unlock/passphrase for the happy path"
     ],
-    elicitation_note: "Secret values are collected in Terminal (hidden prompts) only \u2014 never via MCP elicitation, never in chat. Lock/unlock not needed."
+    elicitation_note: "Never ask for values via MCP elicitation. When the user hands over a value, save it once with store_secret and never repeat it. Lock/unlock not needed."
   });
 }
 function vaultStatusTool(store, dataDir2) {
@@ -38674,9 +38707,8 @@ function vaultStatusTool(store, dataDir2) {
       tool: s.tool,
       action: s.user_action
     })),
-    tip: !initialized ? `Default: plugin Terminal CLI (${bundledCliCommand("setup")} then set). Lock/unlock not needed.` : `Add secrets in Terminal: ${bundledCliCommand("set")}`,
-    recommended_path: primary_action.recommended_path ?? null,
-    copy_paste_command: primary_action.copy_paste_command
+    tip: !initialized ? "Call setup_vault to create the store (nothing for the user to run). Lock/unlock not needed." : "Save secrets with store_secret when the user hands one over; check list_secrets first.",
+    recommended_path: primary_action.recommended_path ?? null
   });
 }
 function vaultManagerTool(store, dataDir2) {
@@ -38690,14 +38722,14 @@ function vaultManagerTool(store, dataDir2) {
     mode: "status_only",
     ui_resource: "ui://password-space/vault-manager.html",
     resource_mime_hint: "text/html;profile=mcp-app",
-    progressive_enhancement: "Status-only. Do not guide users to App forms for add. Human UX is the plugin Terminal CLI.",
+    progressive_enhancement: "Status-only. Do not guide users to App forms for add. Setup is setup_vault; saving is store_secret.",
     apps_ui_expected: false,
-    agent_contract: "Do not call vault_manager for setup. Show Terminal copy_paste_command instead. Use list_secrets / inject_secret. Never paste App HTML/JS into chat.",
+    agent_contract: "Do not call vault_manager for setup. Call setup_vault instead. Use list_secrets / store_secret / remove_secret. Never paste App HTML/JS into chat.",
     apps_fallback: {
-      reason: "Human credential UX is Terminal-only. Run copy_paste_command (or bare cli.js for the menu). Do not use App forms.",
-      recommended_path: store.isInitialized() ? "cli_set" : "cli_setup",
-      next_tool: store.isInitialized() ? "cli_set" : "cli_setup",
-      copy_paste_command: store.isInitialized() ? bundledCliCommand("set") : bundledCliCommand("setup"),
+      reason: "No App forms. The agent sets up with setup_vault and saves with store_secret; Terminal set is an optional fallback.",
+      recommended_path: store.isInitialized() ? "ready" : "setup_vault",
+      next_tool: store.isInitialized() ? "store_secret" : "setup_vault",
+      terminal_fallback: store.isInitialized() ? bundledCliCommand("set") : bundledCliCommand("setup --yes"),
       never: [
         "Guide users to Vault Manager / App forms for add",
         "Paste vault-manager.html / minified JS into chat",
@@ -38716,8 +38748,8 @@ function vaultManagerTool(store, dataDir2) {
       change_passphrase: "Not used",
       inject: "Terminal run -s NAME -- <command> (preferred) or inject_secret"
     },
-    passphrase_note: "Passphrases are not used. Secret values belong in Terminal (hidden prompts) \u2014 never in chat.",
-    elicitation_note: "Secret values are collected in Terminal only \u2014 never via MCP elicitation."
+    passphrase_note: "Passphrases are not used.",
+    elicitation_note: "Never ask for values via MCP elicitation."
   });
 }
 var AGENT_ACTOR = "mcp-agent";
@@ -38843,7 +38875,14 @@ function removeSecretTool(store, name) {
   });
 }
 function listSecretsTool(store, tag) {
-  assertReady(store);
+  if (!store.isInitialized()) {
+    return jsonResult({
+      secrets: [],
+      initialized: false,
+      next: "No store yet. Call setup_vault (nothing for the user to run), or just store_secret when the user hands you a key \u2014 it creates the store.",
+      note: "Names/ids/tags only. Values are never returned by list_secrets."
+    });
+  }
   const secrets = store.listSecrets(tag).map(publicMeta);
   return jsonResult({
     secrets,
@@ -38955,7 +38994,7 @@ function publicMeta(m2) {
 function assertReady(store) {
   if (!store.isInitialized()) {
     throw new Error(
-      `Password Space store is not set up yet. Call vault_onboard, then run Terminal \`${CLI_SETUP_COMMANDS.plugin_setup}\` and \`${CLI_SETUP_COMMANDS.plugin_set}\`. Lock/unlock are not needed.`
+      "Password Space store is not set up yet. Call setup_vault (the user does not need to run anything). Lock/unlock are not needed."
     );
   }
 }
@@ -39015,6 +39054,20 @@ server.registerTool(
   }
 );
 server.registerTool(
+  "setup_vault",
+  {
+    title: "Set up Password Space",
+    description: "Create the user's local secret store (values in the OS keychain when available) so the agent can save, use and remove secrets by name. Call this when the user asks to set up / install / start Password Space, or when vault_onboard or list_secrets says there is no store. Safe to call again. The user runs nothing in Terminal; no values are read or returned."
+  },
+  async () => {
+    try {
+      return await withVaultStore(dataDir, (store) => setupVaultTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
   "vault_status",
   {
     title: "Password Space status",
@@ -39033,7 +39086,7 @@ K3(
   "vault_manager",
   {
     title: "Vault status (optional)",
-    description: 'Status-only. Do NOT use for add/remove \u2014 human UX is the plugin Terminal CLI (`node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"` menu|setup|set|remove). Prefer vault_status / list_secrets / inject_secret. Lock/unlock not needed.',
+    description: "Status-only. Do NOT use for setup or add/remove \u2014 use setup_vault, store_secret and remove_secret. Prefer vault_status / list_secrets. Lock/unlock not needed.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },

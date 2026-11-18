@@ -8,25 +8,19 @@ This folder is the plugin for Cursor and Claude Code, and the bundle Codex uses.
 
 | Piece | Purpose |
 | --- | --- |
-| MCP server (`dist/index.js`) | Status, list, inject by name |
-| Terminal CLI (`dist/cli.js`) | **Sole human UX** — interactive menu + setup / add / remove (hidden value prompts) — **bundled; no clone** |
-| Skill + `/setup-password-space` | Guided setup — Terminal-only |
+| MCP server (`dist/index.js`) | Setup, save, list, remove, use by name |
+| Terminal CLI (`dist/cli.js`) | `run` for agents; optional menu + setup / add / remove for humans (hidden value prompts) — **bundled; no clone** |
+| Skill + `/setup-password-space` | The agent sets everything up; nothing to paste |
 | Hooks | Gentle welcome when no store yet; block prompts that contain a stored value; block agent commands and file reads that would read values directly (`get`, keychain lookups, `secrets.json`, inject files) |
 
 ## After install
 
-1. In chat: **`/setup-password-space`** — follow `primary_action` (**Terminal** only).
-2. Open Terminal and run the shown **`copy_paste_command`** — typically:
-   ```bash
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup
-   ```
-   No passphrase. **No git clone.**
-3. Add a credential (or open the menu with no subcommand):
-   ```bash
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"        # interactive menu
-   ```
-4. Back in Cursor: ask the agent to use the secret **by name**. It runs commands as `cli.js run -s NAME -- <command>`, so the value goes into the command's environment, not the chat.
+1. In chat: **`/password-space:setup-password-space`** (Claude Code) or **`/setup-password-space`** (Cursor), or say *"set up Password Space"*. The agent calls `setup_vault`. No passphrase, **no Terminal command, no git clone.**
+2. *"Save this token as GITHUB_TOKEN: …"* — the agent calls `store_secret`.
+3. *"Use GITHUB_TOKEN to …"* — the agent runs `cli.js run -s GITHUB_TOKEN -- <command>`, so the value goes into the command's environment, not the chat. Later sessions find it by name.
+4. *"Remove GITHUB_TOKEN"* — the agent calls `remove_secret`.
+
+Optional, for keys you never want in chat: type them in Terminal with `node "<this folder>/dist/cli.js" set` (hidden prompt).
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
@@ -38,7 +32,8 @@ Default store folder: `~/.password-space`. Optional override: a real absolute `P
 
 | Tool | Returns secrets? |
 | --- | --- |
-| `vault_onboard` | No — start here (`primary_action` only) |
+| `setup_vault` | No — creates the store; the agent calls it during setup |
+| `vault_onboard` | No — the one next step (`primary_action`) |
 | `vault_status` / `list_secrets` | No — agents check `list_secrets` before asking for a key |
 | `store_secret` | No — agent saves a key the user handed over (`overwrite: true` to replace) |
 | `remove_secret` | No — agent deletes a secret by name |

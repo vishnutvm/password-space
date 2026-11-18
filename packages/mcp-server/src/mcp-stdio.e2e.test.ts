@@ -1,7 +1,8 @@
 /**
  * End-to-end: drive the bundled plugin MCP server (plugins/password-space/dist/index.js)
- * over stdio the way an agent host does — store a secret the user handed over,
- * find it by name, use it through the bundled CLI `run`, then remove it.
+ * over stdio the way an agent host does — set up the store (setup_vault, no Terminal),
+ * store a secret the user handed over, find it by name, use it through the bundled
+ * CLI `run`, then remove it.
  *
  * Needs `pnpm build` first (CI runs build before test). Skipped when the bundle is missing.
  */
@@ -87,7 +88,7 @@ describe.skipIf(!bundled)("bundled MCP server over stdio", () => {
   it("lists the add/remove tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
-    for (const n of ["store_secret", "remove_secret", "list_secrets", "vault_set_secret", "vault_delete_secret"]) {
+    for (const n of ["setup_vault", "store_secret", "remove_secret", "list_secrets", "vault_set_secret", "vault_delete_secret"]) {
       expect(names).toContain(n);
     }
     const store = tools.find((t) => t.name === "store_secret")!;
@@ -96,7 +97,29 @@ describe.skipIf(!bundled)("bundled MCP server over stdio", () => {
     );
   });
 
-  it("stores a handed-over secret on a fresh machine without echoing it", async () => {
+  it("before setup, onboarding points the agent at setup_vault (no Terminal step)", async () => {
+    const onboard = await call("vault_onboard");
+    expect(onboard.json.initialized).toBe(false);
+    expect(onboard.json.primary_action.mcp_tool).toBe("setup_vault");
+    expect(onboard.json.copy_paste_command).toBeUndefined();
+    const list = await call("list_secrets");
+    expect(list.result.isError).toBeFalsy();
+    expect(list.json.secrets).toEqual([]);
+    expect(list.json.next).toMatch(/setup_vault/);
+  });
+
+  it("setup_vault creates the store, and calling it again is harmless", async () => {
+    const first = await call("setup_vault");
+    expect(first.result.isError).toBeFalsy();
+    expect(first.json.action).toBe("created");
+    expect(first.json.storage).toBe(realKeychain ? "keychain" : "file");
+    expect(existsSync(join(home, "secrets.json"))).toBe(true);
+    const again = await call("setup_vault");
+    expect(again.json.action).toBe("already_set_up");
+    expect((await call("vault_status")).json.primary_action.id).toBe("ready");
+  });
+
+  it("stores a handed-over secret without echoing it", async () => {
     const { result, text, json } = await call("store_secret", {
       name: "GITHUB_TOKEN",
       value: VALUE,
@@ -179,5 +202,28 @@ describe.skipIf(!bundled)("bundled MCP server over stdio", () => {
       .filter((e) => e.actor === "mcp-agent")
       .map((e) => `${e.action}:${e.secretName}`);
     expect(agentEvents).toEqual(["create:GITHUB_TOKEN", "update:GITHUB_TOKEN", "delete:GITHUB_TOKEN"]);
+  });
+});
+
+describe.skipIf(!bundled)("bundled CLI setup without a terminal (agent fallback)", () => {
+  it("setup --yes creates the store with no prompts and no TTY", () => {
+    const home = mkdtempSync(join(tmpdir(), "ps-e2e-cli-"));
+    try {
+      const base: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && !k.startsWith("PASSWORD_SPACE_")) base[k] = v;
+      }
+      const r = spawnSync(process.execPath, ["--no-warnings", cliJs, "setup", "--yes"], {
+        env: { ...base, PASSWORD_SPACE_HOME: home, PASSWORD_SPACE_KEYCHAIN: "none" },
+        input: "",
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toMatch(/Store created/);
+      expect(existsSync(join(home, "secrets.json"))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

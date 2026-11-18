@@ -20,20 +20,18 @@ server's environment.
 
 ## First run
 
-1. In chat, run **`/setup-password-space`** (or ask the agent to call
-   `vault_onboard`). It answers with one next step and a command to paste.
-2. Run that command in your own Terminal. It uses the CLI bundled with the
-   plugin, so no clone is needed:
-   ```bash
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup   # create the store, pick keychain or file
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set     # name, then the value at a hidden prompt
-   node "${CURSOR_PLUGIN_ROOT}/dist/cli.js"         # interactive menu
-   ```
-   When the MCP server knows the absolute path to `cli.js`, the command it shows
-   uses that path instead.
-3. Back in Cursor, ask the agent to use the secret **by name**. It runs commands
-   as `cli.js run -s NAME -- <command>`, so the value goes into that command's
-   environment and never into the chat.
+1. In chat, run **`/setup-password-space`** (or say *"set up Password Space"*).
+   The agent calls `setup_vault`, which creates the store with values in your
+   OS keychain. There is no command to paste.
+2. Hand the agent a key once: *"save this token as GITHUB_TOKEN: …"*. It calls
+   `store_secret`.
+3. Ask the agent to use the secret **by name**. It runs commands as
+   `cli.js run -s NAME -- <command>`, so the value goes into that command's
+   environment and never into the chat. *"Remove GITHUB_TOKEN"* deletes it.
+
+Optional: to keep a key out of chat entirely, type it in Terminal at a hidden
+prompt with `node "<plugin>/dist/cli.js" set` (`vault_status` returns the exact
+path).
 
 To test the whole flow in a real Cursor app, follow
 [Check the plugin in Cursor](cursor-check.md).
@@ -66,7 +64,7 @@ After reinstalling and reloading, these should hold:
 
 | Check | Expected |
 | --- | --- |
-| `vault_onboard` | A `primary_action` with a `copy_paste_command` that runs `cli.js`, and no secret values |
+| `vault_onboard` | Before setup, a `primary_action` that tells the agent to call `setup_vault`; no secret values |
 | `vault_status` | `initialized: true` once the store exists, with the storage backend in use |
 | `list_secrets` | Your secret names, never values |
 

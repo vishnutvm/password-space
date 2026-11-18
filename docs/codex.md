@@ -133,7 +133,7 @@ command sandbox.
 | MCP server and tools | Yes | Same `dist/index.js`, registered in `config.toml`. |
 | Terminal CLI (`dist/cli.js`) | Yes | Same commands, including `run`. |
 | Skill | Yes | Copied to `~/.agents/skills/password-space`. The copy does not update with the plugin; delete it and run `codex-setup --write` again after an update. |
-| Setup command (`/setup-password-space`) | No | Codex has no plugin commands here. Ask Codex to set up Password Space, or call `vault_onboard`. |
+| Setup command (`/setup-password-space`) | No | Codex has no plugin commands here. Say "set up Password Space" and Codex calls `setup_vault` (the skill tells it to). |
 | SessionStart setup hint | Yes | `claude-session-hint.mjs --host codex`. Adds a hint to the context when no store exists; silent otherwise. |
 | Prompt guard | Yes, after `/hooks` trust | `prompt-guard.mjs --format codex`. Blocks a prompt that contains a stored value (exit 2, reason on stderr). Blocked, not rewritten: retype it using the secret's name. |
 | Tool output filtering | No | As in Claude Code, hooks do not see command output. Use `run`, which redacts. |

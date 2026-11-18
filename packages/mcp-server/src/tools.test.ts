@@ -15,6 +15,7 @@ import {
   assertNoPlaintext,
   removeSecretTool,
   scrubValue,
+  setupVaultTool,
   storeSecretTool,
   checkPrerequisites,
   clearOwnInjectFiles,
@@ -173,7 +174,7 @@ describe("vault lifecycle MCP tools", () => {
       storage: string;
       lock_unlock_needed: boolean;
       prerequisites: { node_ok: boolean; required_node: string };
-      primary_action: { id: string; copy_paste_command?: string };
+      primary_action: { id: string; mcp_tool?: string; terminal_fallback?: string };
       recommended_path: string | null;
       next_steps: Array<{ tool?: string }>;
     };
@@ -183,31 +184,36 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.lock_unlock_needed).toBe(false);
     expect(parsed.prerequisites.node_ok).toBe(true);
     expect(parsed.prerequisites.required_node).toBe(`>=${MIN_NODE_MAJOR}`);
-    expect(parsed.primary_action.id).toBe("cli_setup");
-    expect(parsed.recommended_path).toBe("cli_setup");
-    expect(parsed.next).toMatch(/Terminal|copy_paste|setup/i);
-    expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("setup"));
-    expect(parsed.next_steps.some((s) => s.tool === "cli_setup")).toBe(true);
+    expect(parsed.primary_action.id).toBe("setup_vault");
+    expect(parsed.primary_action.mcp_tool).toBe("setup_vault");
+    expect(parsed.recommended_path).toBe("setup_vault");
+    expect(parsed.next).toMatch(/setup_vault/);
+    expect(parsed.primary_action.terminal_fallback).toBe(bundledCliCommand("setup --yes"));
+    expect(parsed.next_steps.some((s) => s.tool === "setup_vault")).toBe(true);
     store.close();
   });
 
-  it("buildPrimaryAction prefers cli_setup when store missing", () => {
+  it("buildPrimaryAction has the agent run setup_vault when the store is missing", () => {
     const action = buildPrimaryAction(false);
-    expect(action.id).toBe("cli_setup");
-    expect(action.recommended_path).toBe("cli_setup");
-    expect(action.mcp_tool).toBeUndefined();
-    expect(action.copy_paste_command).toBe(bundledCliCommand("setup"));
-    expect(action.copy_paste_command).toMatch(/cli\.js/);
+    expect(action.id).toBe("setup_vault");
+    expect(action.recommended_path).toBe("setup_vault");
+    expect(action.mcp_tool).toBe("setup_vault");
+    expect(action.do_this).toMatch(/nothing in Terminal/i);
+    expect(action.never).toMatch(/Never ask the user to paste a Terminal command/);
+    expect(action.terminal_fallback).toMatch(/cli\.js" setup --yes$/);
     expect(action.advanced_escape_hatch?.cli_command).toBe(
       CLI_SETUP_COMMANDS.from_clone_optional,
     );
   });
 
-  it("buildPrimaryAction prefers cli_set when store ready", () => {
+  it("buildPrimaryAction says save / use / remove by name when the store is ready", () => {
     const action = buildPrimaryAction(true);
-    expect(action.id).toBe("cli_set");
-    expect(action.recommended_path).toBe("cli_set");
-    expect(action.copy_paste_command).toBe(bundledCliCommand("set"));
+    expect(action.id).toBe("ready");
+    expect(action.recommended_path).toBe("ready");
+    expect(action.do_this).toMatch(/store_secret/);
+    expect(action.do_this).toMatch(/remove_secret/);
+    expect(action.do_this).toMatch(/list_secrets/);
+    expect(action.terminal_fallback).toBe(bundledCliCommand("set"));
   });
 
   it("CLI_SETUP_COMMANDS.plugin_* use CURSOR_PLUGIN_ROOT bundled cli.js", () => {
@@ -231,7 +237,7 @@ describe("vault lifecycle MCP tools", () => {
     expect(good.ok).toBe(true);
   });
 
-  it("vault_onboard returns cli_setup primary_action for newcomers", () => {
+  it("vault_onboard points newcomers at setup_vault, not a Terminal command", () => {
     const dir = tempDir();
     const store = new VaultStore(secretsStorePath(dir));
     const result = vaultOnboardTool(store, dir);
@@ -245,10 +251,10 @@ describe("vault lifecycle MCP tools", () => {
         id: string;
         do_this: string;
         mcp_tool?: string;
-        copy_paste_command?: string;
         recommended_path?: string;
       };
       recommended_path: string | null;
+      next_tool: string | null;
       copy_paste_command?: string;
       what_to_do: string[];
       never_do: string[];
@@ -260,44 +266,45 @@ describe("vault lifecycle MCP tools", () => {
     };
     expect(parsed.checklist.length).toBeGreaterThan(2);
     expect(parsed.checklist.find((s) => s.id === "init")?.done).toBe(false);
-    expect(parsed.human_summary).toMatch(/Terminal|Welcome|Password Space/i);
+    expect(parsed.human_summary).toMatch(/setup_vault/);
     expect(parsed.trust_line).toMatch(/keychain/i);
     expect(parsed.storage).toBeNull();
     expect(parsed.lock_unlock_needed).toBe(false);
     expect(parsed.setup_state).toBe("needs_init");
-    expect(parsed.primary_action.id).toBe("cli_setup");
-    expect(parsed.recommended_path).toBe("cli_setup");
-    expect(parsed.primary_action.mcp_tool).toBeUndefined();
-    expect(parsed.copy_paste_command).toBe(bundledCliCommand("setup"));
-    expect(parsed.primary_action.do_this).toMatch(/Terminal|copy_paste/i);
+    expect(parsed.primary_action.id).toBe("setup_vault");
+    expect(parsed.recommended_path).toBe("setup_vault");
+    expect(parsed.primary_action.mcp_tool).toBe("setup_vault");
+    expect(parsed.next_tool).toBe("setup_vault");
+    expect(parsed.copy_paste_command).toBeUndefined();
+    expect(parsed.primary_action.do_this).toMatch(/Call the setup_vault tool/);
     expect(parsed.what_to_do).toHaveLength(1);
     expect(parsed.never_do.some((n) => /chat/i.test(n))).toBe(true);
-    expect(parsed.elicitation_note).toMatch(/never via MCP elicitation/i);
+    expect(parsed.elicitation_note).toMatch(/Never ask for values via MCP elicitation/);
     expect(parsed.never_edit).toContain("mcp.json");
-    expect(parsed.recovery.howToFix).toMatch(/Terminal|setup/i);
+    expect(parsed.recovery.howToFix).toMatch(/setup_vault/);
     store.close();
   });
 
-  it("vault_onboard guides cli_set when store already exists", async () => {
+  it("vault_onboard says ready (save / use / remove by name) when store already exists", async () => {
     const dir = tempDir();
     const store = new VaultStore(secretsStorePath(dir));
     store.ensure();
     const result = vaultOnboardTool(store, dir);
     const parsed = JSON.parse(result.content[0]!.text) as {
       setup_state: string;
-      primary_action: { id: string; mcp_tool?: string; copy_paste_command?: string };
+      primary_action: { id: string; mcp_tool?: string; terminal_fallback?: string };
       recommended_path: string | null;
       recovery: { code: string };
       human_summary: string;
       lock_unlock_needed: boolean;
     };
     expect(parsed.setup_state).toBe("ready");
-    expect(parsed.primary_action.id).toBe("cli_set");
-    expect(parsed.recommended_path).toBe("cli_set");
+    expect(parsed.primary_action.id).toBe("ready");
+    expect(parsed.recommended_path).toBe("ready");
     expect(parsed.lock_unlock_needed).toBe(false);
-    expect(parsed.primary_action.copy_paste_command).toBe(bundledCliCommand("set"));
+    expect(parsed.primary_action.terminal_fallback).toBe(bundledCliCommand("set"));
     expect(parsed.recovery.code).toBe("ready");
-    expect(parsed.human_summary).toMatch(/ready|inject/i);
+    expect(parsed.human_summary).toMatch(/ready/i);
     store.close();
   });
 
@@ -371,8 +378,8 @@ describe("vault lifecycle MCP tools", () => {
     expect(parsed.app).toBe("vault-manager");
     expect(parsed.ui_resource).toMatch(/^ui:\/\//);
     expect(parsed.apps_ui_expected).toBe(false);
-    expect(parsed.apps_fallback.recommended_path).toBe("cli_set");
-    expect(parsed.agent_contract).toMatch(/Terminal/i);
+    expect(parsed.apps_fallback.recommended_path).toBe("ready");
+    expect(parsed.agent_contract).toMatch(/setup_vault/);
     expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
     expect(result.content[0]!.text).not.toMatch(/<!DOCTYPE html>/i);
     expect(parsed.secrets[0]?.name).toBe("DEMO_KEY");
@@ -382,7 +389,7 @@ describe("vault lifecycle MCP tools", () => {
     store.close();
   });
 
-  it("vault_manager apps_fallback recommends cli_setup when store missing", () => {
+  it("vault_manager apps_fallback recommends setup_vault when store missing", () => {
     const dir = tempDir();
     const store = new VaultStore(secretsStorePath(dir));
     const result = vaultManagerTool(store, dir);
@@ -393,8 +400,8 @@ describe("vault lifecycle MCP tools", () => {
         never?: string[];
       };
     };
-    expect(parsed.apps_fallback.recommended_path).toBe("cli_setup");
-    expect(parsed.apps_fallback.next_tool).toBe("cli_setup");
+    expect(parsed.apps_fallback.recommended_path).toBe("setup_vault");
+    expect(parsed.apps_fallback.next_tool).toBe("setup_vault");
     expect(parsed.apps_fallback.never?.join(" ")).toMatch(/App forms|vault-manager\.html/i);
     store.close();
   });
@@ -637,5 +644,79 @@ describe("agent-managed secrets (store_secret / remove_secret)", () => {
   it("legacy tool names point at the same implementations", () => {
     expect(vaultSetSecretTool).toBe(storeSecretTool);
     expect(vaultDeleteSecretTool).toBe(removeSecretTool);
+  });
+});
+
+describe("setup_vault (the agent runs setup; the user pastes nothing)", () => {
+  function parse(result: { content: Array<{ text: string }> }): Record<string, any> {
+    return JSON.parse(result.content[0]!.text) as Record<string, any>;
+  }
+
+  it("creates the store in the OS keychain and tells the user what to say next", () => {
+    const dir = tempDir();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: new MemoryKeychain() });
+    expect(store.isInitialized()).toBe(false);
+    const parsed = parse(setupVaultTool(store, dir));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.action).toBe("created");
+    expect(parsed.storage).toBe("keychain");
+    expect(parsed.secret_count).toBe(0);
+    expect(existsSync(secretsStorePath(dir))).toBe(true);
+    expect(parsed.tell_user).toMatch(/save this token as GITHUB_TOKEN/);
+    expect(parsed.tell_user).toMatch(/remove GITHUB_TOKEN/);
+    expect(parsed.tell_user).not.toMatch(/Terminal/);
+    expect(store.isInitialized()).toBe(true);
+    store.close();
+  });
+
+  it("is safe to call again and keeps existing secrets", () => {
+    const dir = tempDir();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: new MemoryKeychain() });
+    setupVaultTool(store, dir);
+    store.setSecret({ name: "GITHUB_TOKEN", value: "ghp_keepMe_1234567890" });
+    const result = setupVaultTool(store, dir);
+    assertNoPlaintext(result, "ghp_keepMe_1234567890");
+    const parsed = parse(result);
+    expect(parsed.action).toBe("already_set_up");
+    expect(parsed.secret_count).toBe(1);
+    expect(store.getSecret("GITHUB_TOKEN").value).toBe("ghp_keepMe_1234567890");
+    store.close();
+  });
+
+  it("moves plain-text values into the keychain without returning them", () => {
+    const dir = tempDir();
+    const kc = new MemoryKeychain();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: kc, storage: "file" });
+    store.setSecret({ name: "OLD_KEY", value: "plain-text-value-123456" });
+    expect(store.storageInfo().migration_available).toBe(true);
+    const result = setupVaultTool(store, dir);
+    assertNoPlaintext(result, "plain-text-value-123456");
+    const parsed = parse(result);
+    expect(parsed.moved_to_keychain).toBe(1);
+    expect(parsed.storage).toBe("keychain");
+    expect(parsed.migrate_command).toBeUndefined();
+    expect(readFileSync(secretsStorePath(dir), "utf8")).not.toContain("plain-text-value-123456");
+    expect(store.getSecret("OLD_KEY").value).toBe("plain-text-value-123456");
+    store.close();
+  });
+
+  it("falls back to the file store where there is no keychain", () => {
+    const dir = tempDir();
+    const store = new VaultStore(secretsStorePath(dir), { keychain: null });
+    const parsed = parse(setupVaultTool(store, dir));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.storage).toBe("file");
+    expect(parsed.tell_user).toMatch(/private file/);
+    store.close();
+  });
+
+  it("list_secrets before setup returns an empty list that points at setup_vault, not an error", () => {
+    const dir = tempDir();
+    const store = new VaultStore(secretsStorePath(dir));
+    const parsed = parse(listSecretsTool(store));
+    expect(parsed.secrets).toEqual([]);
+    expect(parsed.initialized).toBe(false);
+    expect(parsed.next).toMatch(/setup_vault/);
+    store.close();
   });
 });

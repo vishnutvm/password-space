@@ -29,7 +29,7 @@ function main() {
     JSON.stringify({
       continue: true,
       additional_context:
-        "Password Space: store not set up — run /setup-password-space, call vault_onboard, follow primary_action (Terminal: node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\" setup, then set — no clone, no passphrase, no unlock). Never ask for secret values in chat. Do not use App forms. Do not ask the user to edit mcp.json.",
+        "Password Space: store not set up. If the user wants to set it up, or hands you a key to save, call the password-space MCP tool setup_vault yourself (or run /setup-password-space). Do not ask the user to paste a Terminal command. Never repeat secret values. No passphrase or unlock. Do not ask the user to edit mcp.json.",
     }),
   );
 }
