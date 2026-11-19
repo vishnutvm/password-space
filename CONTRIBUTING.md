@@ -3,7 +3,7 @@
 ## Principles
 
 1. **Chat stays clean** — MCP list/metadata tools must not return values; agents use secrets by name through `run`.
-2. **Terminal-only human UX** — no App UI / Configure variables for secret entry.
+2. **The agent does setup** — `setup_vault` creates the store; the user never pastes a setup command. Values are entered by handing them to the agent (`store_secret`) or at a hidden Terminal prompt, never via App UI / Configure variables.
 3. **OS keychain store** — values in the OS keychain, names in `secrets.json` (mode `0600`), plain-file fallback only without a keychain; do not reintroduce unlock as a required gate without an explicit product decision.
 4. **Local-first** — sync/cloud features are out of scope until designed with a threat model update.
 5. **No destructive migrate-by-default** — never wipe a user's existing `~/.password-space` or legacy `vault.db`.

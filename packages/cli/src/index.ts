@@ -150,7 +150,7 @@ Commands:
   migrate [--to file]    Move values into the OS keychain (or back to secrets.json)
   codex-setup [--write]  Print (or append) the ~/.codex/config.toml block for OpenAI Codex
   menu | interactive     Full interactive menu
-  onboard                Print next Terminal step
+  onboard                Print the next setup step
   get <name>             Show a value (interactive terminal only, asks first)
   audit                  Recent access events (no values)
   help                   Show this help
@@ -162,7 +162,8 @@ Options:
   --notes <text>         Notes for set
   --tag <tag>            Filter list by tag
   --json                 Machine-readable output
-  --yes                  Skip confirm prompts where safe
+  --yes                  Answer yes to confirm prompts (setup: move plain-text values into the keychain;
+                         remove: delete without asking)
 
 ${RUN_USAGE}
 
@@ -241,8 +242,10 @@ Password Space — setup
   if (info.migration_available) {
     console.log(`
 ${count} secret value(s) are stored in plain text in secrets.json, and this machine has a keychain.`);
-    const move =
-      flags.yes || !input.isTTY
+    // --yes accepts the default (move); without a terminal and without --yes, leave them.
+    const move = flags.yes
+      ? true
+      : !input.isTTY
         ? false
         : /^(y|yes|)$/i.test(await promptVisible("Move them into the OS keychain now? [Y/n]: "));
     if (move) {
@@ -254,13 +257,10 @@ ${count} secret value(s) are stored in plain text in secrets.json, and this mach
   printLegacyHint(dataDir);
 
   console.log(`
-Next (still in Terminal — never paste values in chat):
-  ${selfCmd()} set
-  # or: ${selfCmd()}   → interactive menu
-
-Back in your agent:
-  • vault_status / list_secrets
-  • ${selfCmd()} run -s NAME -- <command>   (secret goes into the command's env)
+Next:
+  • Tell your agent "save this token as GITHUB_TOKEN" and give it the token once, or
+  • type it yourself at a hidden prompt: ${selfCmd()} set
+Agents use secrets by name: ${selfCmd()} run -s NAME -- <command>
 `);
 }
 
@@ -628,16 +628,14 @@ async function main(): Promise<void> {
         const snap = storeSnapshot(dataDir);
         if (!snap.initialized) {
           console.log("Password Space — next step\n");
-          console.log("  Open Terminal and run (plugin-bundled CLI — no clone):");
-          console.log('    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup');
-          console.log(`    (or: ${selfCmd()} setup)`);
-          console.log("\n  Then add a named secret:");
-          console.log('    node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
+          console.log("  In Claude Code run /password-space:setup-password-space (or ask your agent to");
+          console.log("  \"set up Password Space\"): the agent creates the store for you.");
+          console.log(`\n  Without an agent: ${selfCmd()} setup`);
           break;
         }
-        console.log('Store ready. Next: node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set');
-        console.log("  Or run without args for the interactive menu.");
-        console.log("  Then in your agent: vault_status / list_secrets, and run -s NAME -- <command>");
+        console.log("Store ready. Hand a key to your agent once (\"save this token as GITHUB_TOKEN\"),");
+        console.log(`  or type it yourself at a hidden prompt: ${selfCmd()} set`);
+        console.log("  Agents use secrets by name: run -s NAME -- <command>");
         printLegacyHint(dataDir);
         break;
       }

@@ -109,11 +109,29 @@ test("PASSWORD_SPACE_PROMPT_GUARD=block restores blocking", () => {
   noValue(cursor);
 });
 
-test("SessionStart hint: silent with a store, Codex wording without one", () => {
+test("SessionStart hint: lists saved names (never values) with a store, setup wording without one", () => {
   const hint = join(root, "plugins/password-space/scripts/claude-session-hint.mjs");
   const withStore = spawnSync(process.execPath, [hint, "--host", "codex"], { encoding: "utf8", env: env() });
   assert.equal(withStore.status, 0);
-  assert.equal(withStore.stdout, "");
+  assert.ok(!withStore.stdout.includes(VALUE), "hint leaked a secret value");
+  const ctx = JSON.parse(withStore.stdout).hookSpecificOutput.additionalContext;
+  assert.match(ctx, /saved secrets named OPENAI_KEY\./);
+  assert.match(ctx, /run -s NAME -- <command>/);
+  assert.match(ctx, /do not read a same-named variable from the shell environment/);
+
+  const emptyStore = mkdtempSync(join(tmpdir(), "ps-hint-nosecrets-"));
+  try {
+    const setup = spawnSync(process.execPath, [cli, "setup", "--yes"], {
+      encoding: "utf8",
+      env: { ...env(), PASSWORD_SPACE_HOME: emptyStore },
+    });
+    assert.equal(setup.status, 0, setup.stderr);
+    const r = spawnSync(process.execPath, [hint], { encoding: "utf8", env: { ...env(), PASSWORD_SPACE_HOME: emptyStore } });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, "", "no secrets yet: stay silent");
+  } finally {
+    rmSync(emptyStore, { recursive: true, force: true });
+  }
 
   const empty = mkdtempSync(join(tmpdir(), "ps-hint-empty-"));
   try {
@@ -125,7 +143,7 @@ test("SessionStart hint: silent with a store, Codex wording without one", () => 
     assert.equal(r.status, 0);
     const out = JSON.parse(r.stdout).hookSpecificOutput;
     assert.equal(out.hookEventName, "SessionStart");
-    assert.match(out.additionalContext, /vault_onboard/);
+    assert.match(out.additionalContext, /setup_vault/);
     assert.doesNotMatch(out.additionalContext, /\/password-space:setup/);
     assert.ok(out.additionalContext.includes(join(root, "plugins/password-space/dist/cli.js")));
   } finally {

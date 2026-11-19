@@ -8,8 +8,9 @@
 **Give AI coding agents your API keys by name, not by pasting them into chat.**
 
 Password Space is a local secret store for developers who work with AI agents
-(Claude Code, Cursor, OpenAI Codex). You save a secret once in your Terminal.
-Your agent sees only its name, and runs commands like
+(Claude Code, Cursor, OpenAI Codex). After you install the plugin, the agent
+sets it up for you. You hand it a key once (or type it in your Terminal), and
+from then on the agent sees only its name and runs commands like
 
 ```bash
 password-space run -s GITHUB_TOKEN -- gh repo list
@@ -41,8 +42,9 @@ work with instead.
 - **`run` by name.** `run -s NAME -- <cmd>` starts the command without a shell,
   with the secret in its environment, and replaces the value with `[REDACTED]`
   in output that is not a terminal (which is how agents run commands).
-- **MCP server for agents.** List secret names, check status, save a key the
-  user hands over (`store_secret`), and get the exact `run` command to use.
+- **MCP server for agents.** Set up the store (`setup_vault`), list secret
+  names, save a key the user hands over (`store_secret`), remove one
+  (`remove_secret`), and get the exact `run` command to use.
   No tool returns a value by default.
 - **Prompt and tool hooks.** Warn when a prompt contains a stored value (the
   prompt still goes through and the agent is told to use it by name), and
@@ -64,13 +66,15 @@ Pick the tool you use. All of them share one store in `~/.password-space`.
 /plugin install password-space@password-space-marketplace
 ```
 
-Restart Claude Code and run `/password-space:setup-password-space`.
-Details: [docs/claude-code.md](./docs/claude-code.md).
+Restart Claude Code and run `/password-space:setup-password-space` (or just
+say *"set up Password Space"*). Claude creates the store itself; there is no
+command to paste. Details: [docs/claude-code.md](./docs/claude-code.md).
 
 **Cursor**
 
 Settings → Plugins → Add marketplace → `https://github.com/vishnutvm/password-space`,
 install **password-space**, reload the window, then run `/setup-password-space`.
+The agent creates the store itself.
 Details: [docs/cursor.md](./docs/cursor.md).
 
 **OpenAI Codex**
@@ -93,17 +97,31 @@ plugin's bundled `dist/cli.js`. Requires Node.js 20 or newer.
 
 ## Usage
 
-### Save a secret (you, in Terminal)
+### Set up and save a secret (just ask the agent)
+
+After installing the plugin, everything happens in chat:
+
+1. `/password-space:setup-password-space` (Claude Code) or `/setup-password-space`
+   (Cursor). The agent calls `setup_vault`, which creates `~/.password-space`
+   with values in your OS keychain. Nothing to paste.
+2. *"Save this token as GITHUB_TOKEN: ghp_…"*. The agent calls `store_secret`.
+3. *"Use GITHUB_TOKEN to list my repos"*. A later session finds it by name.
+4. *"Remove GITHUB_TOKEN"*. The agent calls `remove_secret`.
+
+The agent only needs Node.js 20+. If it is missing, the setup command says how
+to install it.
+
+### Save a secret yourself, in Terminal (optional)
 
 ```bash
-password-space setup              # create the store, pick keychain or file
+password-space setup              # create the store (keychain when available)
 password-space set GITHUB_TOKEN   # value typed at a hidden prompt
 password-space list               # names and tags, never values
 password-space status             # where values are stored
 ```
 
-Inside a plugin, the same commands are `node "<plugin>/dist/cli.js" …`; the
-setup command shows the exact path. `set` also reads a value from stdin when
+Inside a plugin, the same commands are `node "<plugin>/dist/cli.js" …`; ask the
+agent for the exact path (`vault_status` returns it). `set` also reads a value from stdin when
 piped, and `--value` exists for scripts (avoid it for real secrets: it lands
 in shell history).
 
@@ -120,18 +138,19 @@ password-space run -s OPENAI_API_KEY=openai-prod -s DATABASE_URL -- npm test
 `-s ENV_VAR=name` maps a stored name to a different variable. The agent only
 ever handles the name.
 
-### Hand a key to the agent once
+### Handing a key to the agent: the trade-off
 
-If you would rather not open a Terminal, give the key to the agent one time
-(*"save this as GITHUB_TOKEN: ghp_…"*). It calls `store_secret`, the value goes
-to the keychain, and later sessions use it by name. The copy you pasted stays
-in that chat's history, so use `set` for keys that should never touch a chat.
+When you give a key to the agent (*"save this as GITHUB_TOKEN: ghp_…"*), the
+value goes to the keychain and later sessions use it by name. The copy you
+pasted stays in that one chat's history, so for keys that should never touch a
+chat, use Terminal `set` instead.
 
 ### MCP tools
 
 | Tool | Returns a value? | Purpose |
 | --- | --- | --- |
-| `vault_onboard` | No | Guided setup: one next step and a command to paste |
+| `setup_vault` | No | Create the store (keychain when available) and move old plain-text values into it. Safe to call again |
+| `vault_onboard` | No | Guided setup: the one next step |
 | `vault_status` | No | Store ready, storage backend, the `run` command to use |
 | `list_secrets` / `get_secret_metadata` | No | Names, ids, tags, notes |
 | `store_secret` | No | Save a key the user handed over (`overwrite: true` to replace) |
@@ -144,13 +163,13 @@ in that chat's history, so use `set` for keys that should never touch a chat.
 
 ```mermaid
 flowchart LR
-  Human[You, in Terminal] -->|setup / set / remove| CLI[password-space CLI]
+  Human[You, in Terminal, optional] -->|setup / set / remove| CLI[password-space CLI]
   CLI --> Store
   subgraph Store[Local store]
     KC[(OS keychain: values)]
     JSON[(secrets.json: names, fingerprints)]
   end
-  Agent[AI agent] -->|list, status, store| MCP[MCP server]
+  Agent[AI agent] -->|setup, list, store, remove| MCP[MCP server]
   MCP --> Store
   Agent -->|run -s NAME -- cmd| CLI
   CLI -->|value in env, output redacted| Cmd[Child process]

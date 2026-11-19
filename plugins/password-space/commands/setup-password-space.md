@@ -1,41 +1,47 @@
 ---
-description: Set up Password Space — Terminal-only interactive CLI for setup, add, remove (no unlock)
+description: Set up Password Space for the user (the agent does it; the user pastes nothing). Use when the user says "set up password space", "install password space", "start password space" or "/setup-password-space".
 ---
 
-Setup for a **non-technical** user. **Never** ask for tokens in chat. **Never** ask them to edit `mcp.json`. **Sole human path is Terminal** with the **plugin-bundled CLI** (no repo clone). Lock/unlock are **not** needed.
+Set up Password Space **for** the user. They may not be technical. **You** do every step. Do **not** give them a command to paste into Terminal. Do **not** ask them to edit `mcp.json`. Do **not** ask for any secret value during setup.
 
-## Start
+## 1. Run setup
 
-1. Call **`vault_onboard`**.
-2. Read **`primary_action`** aloud in plain language — that is the **only** next step.
-3. If `recommended_path` / `primary_action.id` is **`cli_setup`** or **`cli_set`**: show **`copy_paste_command`** and wait for them to finish in Terminal. Then call **`vault_status`** / **`list_secrets`**.
-4. **Do not** tell them to `git clone` — the CLI is at `${CURSOR_PLUGIN_ROOT}/dist/cli.js` after plugin install + Reload.
-5. **Do not** call **`vault_manager`** or guide them to App forms for add / remove.
-6. **Do not** require unlock or a passphrase.
+Call the Password Space MCP tool **`setup_vault`** (no arguments). It creates `~/.password-space`, keeps values in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service; a private file when there is none), and moves any old plain-text values into the keychain. It is safe to call again.
 
-## If Node is too old (`primary_action.id` = `fix_node`)
+When it returns `ok: true`, go to step 3.
 
-Tell them to install **Node.js 20+** from https://nodejs.org, reload Cursor, then run this command again.
+## 2. Only if the `setup_vault` tool is not available
 
-## If store does not exist (`cli_setup`)
+The Password Space MCP server did not start. The usual reason is Node.js missing or older than 20.
 
-- Show Terminal `copy_paste_command` (typically `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" setup`, or an absolute path when MCP resolves it).
-- No passphrase. Creates `~/.password-space/secrets.json` (names only; values go to the OS keychain, or stay in that file where no keychain exists). If it offers to move existing values into the keychain, recommend yes.
-- Then show **set** so they can name a secret.
+1. Run with Bash: `node -v`
+2. **No Node, or below v20:** tell the user, in plain words:
+   - Mac: install the **LTS** version from https://nodejs.org (the `.pkg` installer), or run `brew install node` if they use Homebrew.
+   - Windows: the LTS installer from https://nodejs.org.
+   - Then **quit and reopen** Claude Code (or reload Cursor) and run `/password-space:setup-password-space` again.
+   Stop here.
+3. **Node is v20 or newer:** run the bundled CLI yourself with Bash (one command, no secrets in it):
 
-## If store ready (`cli_set`)
+   ```bash
+   CLI="${CLAUDE_PLUGIN_ROOT}/dist/cli.js"; [ -f "$CLI" ] || CLI="$(find "$HOME/.claude/plugins" "$HOME/.cursor/plugins" -path '*password-space*/dist/cli.js' 2>/dev/null | head -1)"; [ -n "$CLI" ] && node "$CLI" setup --yes || echo "password-space cli.js not found"
+   ```
 
-Show Terminal **`copy_paste_command`** for set (or bare `cli.js` for the interactive menu). After they finish, confirm with **`list_secrets`** / **`vault_status`**. For agent use, run commands as `cli.js run -s NAME -- <command>`; use **`inject_secret`** only when a command cannot be wrapped.
+   If it prints `Store created` or `Store already exists`, setup worked. Tell the user to run `/mcp` (or restart Claude Code) once so the save / remove tools connect. If `cli.js` is not found, tell them to reinstall the plugin (`/plugin install password-space@password-space-marketplace`).
 
-## Legacy encrypted vault
+## 3. Tell the user it is ready
 
-If onboard reports `legacy_encrypted_vault`, say the old `vault.db` is left untouched — re-add secrets with Terminal `set`. Do not wipe or auto-migrate.
+Say `tell_user` from the result in plain words (no JSON, no paths unless they ask). In short:
+
+> Password Space is ready. Your secrets stay in your Mac's Keychain. From now on just tell me things like:
+> - "save this token as GITHUB_TOKEN: ghp_…"
+> - "use GITHUB_TOKEN to list my repos"
+> - "remove GITHUB_TOKEN"
+> Any later session finds saved secrets by name, so you only give me a token once.
 
 ## Rules
 
-- One primary action per turn until `vault_status` shows the store ready.
-- Summarize errors using **`howToFix` / `recovery`** — never dump JSON.
-- Confirm success without secret values.
-- Secret values only via Terminal (hidden) — never elicitation, never chat, never App forms.
-- Do **not** mention Plugins → Configure for vault home (defaults to `~/.password-space`).
-- Lock / unlock / passphrase are not part of the product path.
+- Never repeat, print or echo a secret value, even one the user just gave you.
+- Never ask for a passphrase or unlock step (there is none).
+- Summarize errors with `howToFix` / `recovery` in plain words; never dump JSON.
+- If the result has `legacy_encrypted_vault: true`, say the old `vault.db` was left untouched and its secrets need to be saved again.
+- Do not call `vault_manager` for setup.

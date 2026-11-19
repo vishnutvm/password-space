@@ -34,6 +34,7 @@ import {
   removeSecretTool,
   resolveSecretTool,
   scrubValue,
+  setupVaultTool,
   storeSecretTool,
   vaultManagerTool,
   vaultOnboardTool,
@@ -96,6 +97,22 @@ server.registerTool(
 );
 
 server.registerTool(
+  "setup_vault",
+  {
+    title: "Set up Password Space",
+    description:
+      "Create the user's local secret store (values in the OS keychain when available) so the agent can save, use and remove secrets by name. Call this when the user asks to set up / install / start Password Space, or when vault_onboard or list_secrets says there is no store. Safe to call again. The user runs nothing in Terminal; no values are read or returned.",
+  },
+  async () => {
+    try {
+      return await withVaultStore(dataDir, (store) => setupVaultTool(store, dataDir));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
   "vault_status",
   {
     title: "Password Space status",
@@ -117,7 +134,7 @@ registerAppTool(
   {
     title: "Vault status (optional)",
     description:
-      "Status-only. Do NOT use for add/remove — human UX is the plugin Terminal CLI (`node \"${CURSOR_PLUGIN_ROOT}/dist/cli.js\"` menu|setup|set|remove). Prefer vault_status / list_secrets / inject_secret. Lock/unlock not needed.",
+      "Status-only. Do NOT use for setup or add/remove — use setup_vault, store_secret and remove_secret. Prefer vault_status / list_secrets. Lock/unlock not needed.",
     inputSchema: {},
     _meta: {
       ui: { resourceUri: VAULT_MANAGER_UI },
