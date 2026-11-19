@@ -43,7 +43,7 @@ body:
     attributes:
       label: Password Space version
       description: From the plugin manifest, `npm ls -g password-space`, or the git commit you built.
-      placeholder: 0.2.0
+      placeholder: 0.2.1
     validations:
       required: true
   - type: input

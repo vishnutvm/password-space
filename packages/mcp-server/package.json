@@ -1,6 +1,6 @@
 {
   "name": "@password-space/mcp-server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "MCP server for Password Space: agents use secrets by name, never through chat",
   "license": "MIT",

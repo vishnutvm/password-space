@@ -1,6 +1,6 @@
 {
   "name": "password-space",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local named secret store for developers and AI agents, backed by your OS keychain. Run commands with secrets by name, never paste them in chat.",
   "keywords": [
     "secrets",

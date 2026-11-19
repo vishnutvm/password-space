@@ -12,6 +12,13 @@ bundled MCP server and the `password-space` CLI on npm. See
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-19
+
+Plugin installs on 0.2.0 saw "On latest version" in Claude Code because the
+changes below shipped without a version bump, so the Update button had nothing
+to update to. This release only raises the version to 0.2.1 so Claude Code and
+Cursor offer the update and pick up the new prompt hook and setup command.
+
 ### Changed
 
 - The prompt hook no longer blocks a prompt that contains a stored value. The
@@ -119,5 +126,6 @@ Initial development line: encrypted local vault, Terminal CLI, MCP server with
 `list_secrets` / `inject_secret` / `resolve_secret`, Vault Manager MCP App and
 Cursor plugin packaging. Never tagged.
 
-[Unreleased]: https://github.com/vishnutvm/password-space/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vishnutvm/password-space/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/vishnutvm/password-space/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/vishnutvm/password-space/releases/tag/v0.2.0

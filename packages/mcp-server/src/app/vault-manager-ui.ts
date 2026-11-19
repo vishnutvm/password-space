@@ -70,7 +70,7 @@ function renderShell(): void {
 
 async function main(): Promise<void> {
   renderShell();
-  const app = new App({ name: "Password Space Vault Manager", version: "0.2.0" });
+  const app = new App({ name: "Password Space Vault Manager", version: "0.2.1" });
 
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const result = await app.callServerTool({ name, arguments: args });
