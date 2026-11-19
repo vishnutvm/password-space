@@ -43,7 +43,7 @@ To test the whole flow in a real Cursor app, follow
 | Hook | Script | What it does |
 | --- | --- | --- |
 | `sessionStart` | `session-vault-hint.mjs` | Adds a setup hint when no store exists yet |
-| `beforeSubmitPrompt` | `prompt-guard.mjs --format cursor` | Blocks a prompt that contains any stored value |
+| `beforeSubmitPrompt` | `prompt-guard.mjs --format cursor` | Warns when a prompt contains a stored value, and lets it through (`PASSWORD_SPACE_PROMPT_GUARD=block` blocks instead) |
 | `beforeShellExecution`, `beforeReadFile` | `shell-guard.mjs --format cursor` | Blocks `get`, direct keychain lookups and reads of `secrets.json` or inject files |
 
 See [SECURITY.md](../SECURITY.md) for what the hooks do and do not cover.
