@@ -99,22 +99,24 @@ not appear in the chat.
 - The value shows in the output: this is a bug. Write down what the agent
   ran and open an issue.
 
-## 7. Check that the prompt hook blocks a pasted secret
+## 7. Check that the prompt hook warns about a pasted secret
 
 In Cursor chat, type `my key is pstest-123456` and send it.
 
-Cursor should **block** the message with: *Password Space blocked this
-prompt: it contains the value of stored secret "PS_TEST_KEY"*.
+The message **goes through**, and Cursor shows a warning: *Password Space:
+this prompt contains the value of stored secret "PS_TEST_KEY". It was sent
+anyway.* The agent must not repeat the value in its reply.
 
 **If it fails:**
-- The message goes through: check that hooks are on for the plugin, reload
-  the window, and try again. Hooks come only with the plugin install, not
-  with a manual MCP setup.
+- No warning: check that hooks are on for the plugin, reload the window, and
+  try again. Hooks come only with the plugin install, not with a manual MCP
+  setup.
 - Values shorter than 6 characters are never checked. Use a longer test
   value.
-- If the hook has an error, it lets the prompt through on purpose, so a
-  broken keychain never locks you out of chat. Look in Cursor's **Output** panel (the Hooks channel, if your
-  version has one) for a `password-space prompt guard` warning.
+- If the hook has an error, it lets the prompt through silently, so a broken
+  keychain never locks you out of chat. Look in Cursor's **Output** panel (the
+  Hooks channel, if your version has one) for a `password-space prompt guard`
+  warning.
 
 ## 8. Clean up
 

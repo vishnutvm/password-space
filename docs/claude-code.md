@@ -74,19 +74,22 @@ The store is the same as in Cursor: `~/.password-space/secrets.json`
 | Cursor hook | Claude Code equivalent | Behaviour |
 | --- | --- | --- |
 | `sessionStart` → `session-vault-hint.mjs` | `SessionStart` (startup) → `claude-session-hint.mjs` | Adds a setup hint to Claude's context when `secrets.json` does not exist. Silent once the store exists. |
-| `beforeSubmitPrompt` → `prompt-guard.mjs --format cursor` | `UserPromptSubmit` → `prompt-guard.mjs --format claude` | **Blocks** a prompt that contains any stored secret value and tells you which secret name matched. Same script for both. |
+| `beforeSubmitPrompt` → `prompt-guard.mjs --format cursor` | `UserPromptSubmit` → `prompt-guard.mjs --format claude` | **Warns, never blocks.** When a prompt contains a stored secret value, the prompt still goes through and you see which secret name matched. In Claude Code the agent is also told the value is already stored under that name and not to repeat it. Same script for both. |
 | `beforeShellExecution` + `beforeReadFile` → `shell-guard.mjs --format cursor` | `PreToolUse` (`Bash`, `Read`, `Grep`) → `shell-guard.mjs --format claude` | **Blocks** agent tool calls that would read a value directly: `get`, keychain lookups, `secrets.json`, inject files. Same script for both. |
 
 What does not carry over:
 
-- **Blocked, not rewritten.** Both hooks block the prompt; Claude Code erases
-  it. Retype it using the secret's name.
+- **Warned, not rewritten.** The prompt hook lets the prompt through as typed,
+  so the value does reach the chat. It warns you and tells Claude to use the
+  secret by name and not repeat the value. Asking Claude to save a value always
+  works. To block such prompts instead, set `PASSWORD_SPACE_PROMPT_GUARD=block`
+  in the environment Claude Code runs in.
 - **Tool output is not filtered.** Neither hook sees output from Bash or other
   tools. Have Claude run commands as `cli.js run -s NAME -- <command>`: the
   value goes into the command's environment and is redacted from its output.
 - **Matching is exact.** Only stored values (keychain or file) and live
   `inject/*.env` values are detected. Values shorter than 6 characters are skipped to
-  avoid false blocks on common strings.
+  avoid false matches on common strings.
 
 Keychain values are matched by a keyed fingerprint stored in `secrets.json`, so
 the hook never reads the values themselves. If the keychain cannot be reached,

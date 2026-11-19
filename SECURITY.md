@@ -55,8 +55,11 @@ run the CLI as you, can request any secret by name.
 ### Prompt hooks
 
 The Cursor (`beforeSubmitPrompt`), Claude Code and Codex (`UserPromptSubmit`) hooks
-block a prompt that contains any stored value of 6 or more characters, plus
-values in live inject files. They do not see tool output, screenshots, or
+detect a prompt that contains any stored value of 6 or more characters, plus
+values in live inject files. They warn and let the prompt through, so the value
+does reach the chat; Claude Code and Codex also tell the agent the secret's
+name and not to repeat the value. Set `PASSWORD_SPACE_PROMPT_GUARD=block` to
+block such prompts instead. They do not see tool output, screenshots, or
 values that were never stored. If the keychain cannot be reached the hook lets
 the prompt through and prints a warning, so a locked keychain never blocks chat.
 

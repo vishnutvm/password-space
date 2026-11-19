@@ -46,7 +46,8 @@ work with instead.
   names, save a key the user hands over (`store_secret`), remove one
   (`remove_secret`), and get the exact `run` command to use.
   No tool returns a value by default.
-- **Prompt and tool hooks.** Block a prompt that contains any stored value, and
+- **Prompt and tool hooks.** Warn when a prompt contains a stored value (the
+  prompt still goes through and the agent is told to use it by name), and
   block agent commands that would read a value directly (`get`, keychain
   lookups, reading the store or inject files).
 - **One plugin, three hosts.** The same bundled folder works as a Claude Code
@@ -172,7 +173,7 @@ flowchart LR
   MCP --> Store
   Agent -->|run -s NAME -- cmd| CLI
   CLI -->|value in env, output redacted| Cmd[Child process]
-  Hooks[Prompt + tool hooks] -.->|block values and direct reads| Agent
+  Hooks[Prompt + tool hooks] -.->|warn on values, block direct reads| Agent
 ```
 
 The repository is a pnpm workspace. Three TypeScript packages are bundled with

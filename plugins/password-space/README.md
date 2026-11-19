@@ -11,7 +11,7 @@ This folder is the plugin for Cursor and Claude Code, and the bundle Codex uses.
 | MCP server (`dist/index.js`) | Setup, save, list, remove, use by name |
 | Terminal CLI (`dist/cli.js`) | `run` for agents; optional menu + setup / add / remove for humans (hidden value prompts) — **bundled; no clone** |
 | Skill + `/setup-password-space` | The agent sets everything up; nothing to paste |
-| Hooks | Gentle welcome when no store yet; block prompts that contain a stored value; block agent commands and file reads that would read values directly (`get`, keychain lookups, `secrets.json`, inject files) |
+| Hooks | Gentle welcome when no store yet; warn (never block) when a prompt contains a stored value; block agent commands and file reads that would read values directly (`get`, keychain lookups, `secrets.json`, inject files) |
 
 ## After install
 
@@ -24,7 +24,7 @@ Optional, for keys you never want in chat: type them in Terminal with `node "<th
 
 You do **not** edit `mcp.json`. Requires **Node.js 20+**.
 
-**Trust:** Values live in the macOS Keychain, Windows Credential Manager or Linux Secret Service; `~/.password-space/secrets.json` holds names only (plain-file fallback where there is no keychain — `status` says which). Prompts containing a stored value are blocked. Values never belong in chat.
+**Trust:** Values live in the macOS Keychain, Windows Credential Manager or Linux Secret Service; `~/.password-space/secrets.json` holds names only (plain-file fallback where there is no keychain — `status` says which). Prompts containing a stored value go through with a warning, and the agent is told to use the secret by name. Values never belong in chat.
 
 Default store folder: `~/.password-space`. Optional override: a real absolute `PASSWORD_SPACE_HOME` in the process environment or MCP Environment (never an unresolved `${PASSWORD_SPACE_HOME}`).
 

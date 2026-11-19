@@ -135,7 +135,7 @@ command sandbox.
 | Skill | Yes | Copied to `~/.agents/skills/password-space`. The copy does not update with the plugin; delete it and run `codex-setup --write` again after an update. |
 | Setup command (`/setup-password-space`) | No | Codex has no plugin commands here. Say "set up Password Space" and Codex calls `setup_vault` (the skill tells it to). |
 | SessionStart setup hint | Yes | `claude-session-hint.mjs --host codex`. Adds a hint to the context when no store exists; silent otherwise. |
-| Prompt guard | Yes, after `/hooks` trust | `prompt-guard.mjs --format codex`. Blocks a prompt that contains a stored value (exit 2, reason on stderr). Blocked, not rewritten: retype it using the secret's name. |
+| Prompt guard | Yes, after `/hooks` trust | `prompt-guard.mjs --format codex`. Never blocks. A prompt that contains a stored value goes through; you get a warning and Codex is told the secret's name and not to repeat the value. `PASSWORD_SPACE_PROMPT_GUARD=block` blocks instead. |
 | Tool output filtering | No | As in Claude Code, hooks do not see command output. Use `run`, which redacts. |
 | Marketplace install | Not yet | Codex has its own plugin format and marketplaces; packaging Password Space as a Codex plugin is a possible follow-up. |
 

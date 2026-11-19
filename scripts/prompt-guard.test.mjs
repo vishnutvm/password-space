@@ -22,8 +22,12 @@ function env() {
   return { ...process.env, PASSWORD_SPACE_HOME: home, PASSWORD_SPACE_KEYCHAIN: "none" };
 }
 
-function runHook(input, args = []) {
-  return spawnSync(process.execPath, [hook, ...args], { input, encoding: "utf8", env: env() });
+function runHook(input, args = [], extraEnv = {}) {
+  return spawnSync(process.execPath, [hook, ...args], { input, encoding: "utf8", env: { ...env(), ...extraEnv } });
+}
+
+function noValue(r) {
+  assert.ok(!r.stdout.includes(VALUE) && !r.stderr.includes(VALUE), "hook output must never contain the value");
 }
 
 before(() => {
@@ -36,16 +40,16 @@ before(() => {
 });
 after(() => rmSync(home, { recursive: true, force: true }));
 
-test("Cursor: blocks a prompt with a stored value (not only injected ones)", () => {
+test("Cursor: lets a prompt with a stored value through with a warning", () => {
   const r = runHook(JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: `use ${VALUE} please` }), [
     "--format",
     "cursor",
   ]);
-  assert.equal(r.status, 2);
+  assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
-  assert.equal(out.continue, false);
-  assert.match(out.user_message, /OPENAI_KEY/);
-  assert.ok(!r.stdout.includes(VALUE) && !r.stderr.includes(VALUE));
+  assert.equal(out.continue, true);
+  assert.match(out.user_message, /OPENAI_KEY.*sent anyway/);
+  noValue(r);
 });
 
 test("Cursor: allows a clean prompt", () => {
@@ -54,12 +58,25 @@ test("Cursor: allows a clean prompt", () => {
   assert.deepEqual(JSON.parse(r.stdout), { continue: true });
 });
 
-test("Claude Code: blocks with exit 2 and a reason on stderr", () => {
+test("Claude Code: never blocks; warns the user and tells the agent the stored name", () => {
   const r = runHook(JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: `key=${VALUE}` }));
-  assert.equal(r.status, 2);
-  assert.match(r.stderr, /blocked this prompt.*OPENAI_KEY/);
-  assert.equal(r.stdout, "");
-  assert.ok(!r.stderr.includes(VALUE));
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.systemMessage, /OPENAI_KEY/);
+  assert.equal(out.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+  assert.match(out.hookSpecificOutput.additionalContext, /already stored.*OPENAI_KEY/);
+  assert.match(out.hookSpecificOutput.additionalContext, /Do not repeat/);
+  noValue(r);
+});
+
+test("Claude Code: an explicit save request goes through", () => {
+  const r = runHook(
+    JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: `add ADMIN_API_KEY: "${VALUE}" to password space` }),
+    ["--format", "claude"],
+  );
+  assert.equal(r.status, 0);
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /never refuse or stop/);
+  noValue(r);
 });
 
 test("Claude Code: allows a clean prompt silently", () => {
@@ -68,14 +85,28 @@ test("Claude Code: allows a clean prompt silently", () => {
   assert.equal(r.stdout, "");
 });
 
-test("Codex: --format codex blocks with exit 2 and a reason on stderr", () => {
+test("Codex: --format codex warns and adds context, never blocks", () => {
   const input = { session_id: "s", turn_id: "t", hook_event_name: "UserPromptSubmit", model: "m", prompt: `token ${VALUE}` };
   const r = runHook(JSON.stringify(input), ["--format", "codex"]);
-  assert.equal(r.status, 2);
-  assert.match(r.stderr, /blocked this prompt.*OPENAI_KEY/);
-  assert.equal(r.stdout, "");
-  assert.ok(!r.stderr.includes(VALUE));
-  assert.equal(runHook(JSON.stringify({ ...input, prompt: "use OPENAI_KEY" }), ["--format", "codex"]).status, 0);
+  assert.equal(r.status, 0);
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /OPENAI_KEY/);
+  noValue(r);
+  const clean = runHook(JSON.stringify({ ...input, prompt: "use OPENAI_KEY" }), ["--format", "codex"]);
+  assert.equal(clean.status, 0);
+  assert.equal(clean.stdout, "");
+});
+
+test("PASSWORD_SPACE_PROMPT_GUARD=block restores blocking", () => {
+  const block = { PASSWORD_SPACE_PROMPT_GUARD: "block" };
+  const claude = runHook(JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: `key=${VALUE}` }), [], block);
+  assert.equal(claude.status, 2);
+  assert.match(claude.stderr, /blocked this prompt.*OPENAI_KEY/);
+  assert.equal(claude.stdout, "");
+  noValue(claude);
+  const cursor = runHook(JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: VALUE }), ["--format", "cursor"], block);
+  assert.equal(cursor.status, 2);
+  assert.equal(JSON.parse(cursor.stdout).continue, false);
+  noValue(cursor);
 });
 
 test("SessionStart hint: lists saved names (never values) with a store, setup wording without one", () => {
