@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Local named secret store for AI agents: secrets by name, never in chat.",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {

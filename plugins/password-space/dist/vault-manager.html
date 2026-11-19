@@ -240,7 +240,7 @@ container holding the app. Specify either width or maxWidth, and either height o
       <section class="panel" id="secrets-panel"></section>
       <p class="foot" id="status-line"></p>
     </div>
-  `}async function oS(){iS();let e=new Is({name:"Password Space Vault Manager",version:"0.2.0"}),r=async(t,n={})=>{let a=await e.callServerTool({name:t,arguments:n}),s=f$(a);if(a.isError||s.ok===!1)throw new Error(String(s.error??s.howToFix??"Tool failed"));return s},i=t=>{let n=t.status??{},a=Cp("page-title"),s=Cp("auth-panel"),c=Cp("secrets-panel"),u=t.apps_fallback?.copy_paste_command??n.primary_action?.copy_paste_command??'node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set';a.textContent="Status",s.innerHTML=`
+  `}async function oS(){iS();let e=new Is({name:"Password Space Vault Manager",version:"0.2.1"}),r=async(t,n={})=>{let a=await e.callServerTool({name:t,arguments:n}),s=f$(a);if(a.isError||s.ok===!1)throw new Error(String(s.error??s.howToFix??"Tool failed"));return s},i=t=>{let n=t.status??{},a=Cp("page-title"),s=Cp("auth-panel"),c=Cp("secrets-panel"),u=t.apps_fallback?.copy_paste_command??n.primary_action?.copy_paste_command??'node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" set';a.textContent="Status",s.innerHTML=`
       <p class="hint">${Rp(n.initialized?"Local plain-text store ready. Lock/unlock not needed.":"Store not created yet. Use Terminal to set up.")}</p>
       <p class="hint">Add or remove secrets in <strong>Terminal only</strong> \u2014 never paste values in chat.</p>
       <pre class="cmd">${Rp(u)}</pre>
