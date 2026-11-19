@@ -12,6 +12,15 @@ bundled MCP server and the `password-space` CLI on npm. See
 
 ## [Unreleased]
 
+### Changed
+
+- The prompt hook no longer blocks a prompt that contains a stored value. The
+  prompt goes through and you see a warning naming the secret. In Claude Code
+  and Codex the agent is also told the value is already stored under that name,
+  not to repeat it, and to still do what you asked, so "add this key to
+  Password Space" always works. Set `PASSWORD_SPACE_PROMPT_GUARD=block` to get
+  the old blocking behavior.
+
 ### Removed
 
 - Unused code left from the encrypted vault, the duplicate root `skills/` and
